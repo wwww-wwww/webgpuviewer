@@ -10,8 +10,14 @@ object ImageUtil {
     external fun resizeLinearAreaNative(srcBitmap: Bitmap, dstBitmap: Bitmap)
 
     fun resize(source: Bitmap, targetW: Int, targetH: Int): Bitmap {
-        val output = Bitmap.createBitmap(targetW, targetH, source.config ?: Bitmap.Config.ARGB_8888)
-        resizeLinearAreaNative(source, output)
+        val output = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888)
+        if (source.config != Bitmap.Config.ARGB_8888) {
+            source.copy(Bitmap.Config.ARGB_8888, false)
+        } else {
+            source
+        }.let {
+            resizeLinearAreaNative(it, output)
+        }
         return output
     }
 }

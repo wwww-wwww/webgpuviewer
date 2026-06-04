@@ -332,9 +332,7 @@ fun WebGpuImageViewer(
     ) {
         onSurface { surface, width, height ->
             try {
-                withContext(Dispatchers.Default) {
-                    renderer.init(bitmap, surface, width, height)
-                }
+                renderer.init(bitmap, surface, width, height)
 
                 renderer.render()
 
