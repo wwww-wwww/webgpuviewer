@@ -16,10 +16,21 @@ class MainActivity : AppCompatActivity() {
         binding = MainActivityBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        val stream = assets.open("8192.webp")
+        val stream = assets.open("ref.png")
         val bitmap = BitmapFactory.decodeStream(stream)
 
-        binding.composeView.apply {
+        val screenWidth = resources.displayMetrics.widthPixels
+
+        binding.composeView1.apply {
+            layoutParams = layoutParams.apply { width = screenWidth }
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+            setContent {
+                WebGpuImageViewer(bitmap)
+            }
+        }
+
+        binding.composeView2.apply {
+            layoutParams = layoutParams.apply { width = screenWidth }
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
             setContent {
                 WebGpuImageViewer(bitmap)
