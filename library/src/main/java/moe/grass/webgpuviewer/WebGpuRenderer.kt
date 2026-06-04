@@ -35,7 +35,7 @@ import kotlin.math.round
 
 class WebGpuRenderer {
     private lateinit var gpu: WebGpu
-    private lateinit var pipeline: GPUComputePipeline
+    private var pipeline: GPUComputePipeline? = null
 
     var tilesize = 4096
 
@@ -64,7 +64,7 @@ class WebGpuRenderer {
     var mipmaps: MutableList<Mipmap> = mutableListOf()
 
     var byteBuffer: ByteBuffer = ByteBuffer.allocateDirect(32)
-    private lateinit var buffer: GPUBuffer
+    var buffer: GPUBuffer? = null
 
     var scale: Float = 1f
     var x: Float = 0f
@@ -100,6 +100,11 @@ class WebGpuRenderer {
     suspend fun init(image: Bitmap, surface: Surface, width: Int, height: Int) {
         gpu = createWebGpu(surface)
         val device = gpu.device
+
+        if (gpu.device.handle == 0L) {
+            Log.w("webgpuviewer", "GPU device is invalid")
+            return
+        }
 
         this.width = width
         this.height = height
@@ -211,7 +216,7 @@ class WebGpuRenderer {
         byteBuffer.putFloat(12, tilesize.toFloat())
         byteBuffer.putFloat(16, mipmap.width.toFloat())
         byteBuffer.putFloat(20, mipmap.height.toFloat())
-        gpu.device.queue.writeBuffer(buffer, 0, byteBuffer)
+        gpu.device.queue.writeBuffer(buffer!!, 0, byteBuffer)
 
         val vx1 = if (mipmap.width > 1) vx + 1 else vx
         val vy1 = if (mipmap.height > 1) vy + 1 else vy
@@ -226,11 +231,11 @@ class WebGpuRenderer {
         }
 
         val pass = commandEncoder.beginComputePass(GPUComputePassDescriptor())
-        pass.setPipeline(pipeline)
+        pass.setPipeline(pipeline!!)
         pass.setBindGroup(
             0, gpu.device.createBindGroup(
                 GPUBindGroupDescriptor(
-                    layout = pipeline.getBindGroupLayout(0),
+                    layout = pipeline!!.getBindGroupLayout(0),
                     entries = arrayOf(
                         GPUBindGroupEntry(
                             binding = 0,
@@ -255,6 +260,6 @@ class WebGpuRenderer {
         }
         mipmaps.forEach { it.tiles.flatten().forEach { it.destroy() } }
         mipmaps.clear()
-        buffer.destroy()
+        buffer?.destroy()
     }
 }
