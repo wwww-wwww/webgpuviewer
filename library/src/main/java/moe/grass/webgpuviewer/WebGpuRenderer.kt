@@ -36,6 +36,8 @@ import androidx.webgpu.awaitGPURequest
 import androidx.webgpu.helper.WebGpu
 import androidx.webgpu.helper.createGpuTexture
 import androidx.webgpu.helper.createWebGpu
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.Executor
@@ -44,6 +46,10 @@ import kotlin.math.log2
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.round
+
+object mutex {
+    val mutex = Mutex()
+}
 
 class WebGpuRenderer {
     private lateinit var gpu: WebGpu
@@ -177,56 +183,64 @@ class WebGpuRenderer {
         )
         byteBuffer.order(ByteOrder.nativeOrder())
 
-        awaitGPURequest { callback ->
-            mipmaps.forEach { it.tiles.flatten().forEach { it.destroy() } }
-            mipmaps.clear()
-            mipmaps.add(Mipmap(1f, createTiles(device, image)))
-
-            var scale = 1f
-            while (image_width * scale > 512 && image_height * scale > 512) {
-                scale /= 2
-
-                if (image_width * scale < 4096 && image_height * scale < 4096) {
-                    val texture = device.createTexture(
-                        GPUTextureDescriptor(
-                            size = GPUExtent3D(
-                                (image_width * scale).toInt(),
-                                (image_height * scale).toInt(),
-                                1
-                            ),
-                            usage = TextureUsage.TextureBinding or TextureUsage.RenderAttachment,
-                            format = TextureFormat.RGBA8Unorm
-                        )
-                    )
-                    render(mipmaps[mipmaps.size - 1], texture, 0f, 0f, scale)
-                    mipmaps.add(Mipmap(scale, listOf(listOf(texture))))
-                } else {
-                    val im = ImageUtil.resize(
-                        image,
-                        (image_width * scale).toInt(),
-                        (image_height * scale).toInt()
-                    )
-                    mipmaps.add(Mipmap(scale, createTiles(device, im)))
-                }
+        mutex.mutex.withLock {
+            awaitGPURequest { callback ->
+                gpu.device.queue.submit(arrayOf(gpu.device.createCommandEncoder().finish()))
+                gpu.device.queue.onSubmittedWorkDone({ it.run() }, callback)
             }
+            awaitGPURequest { callback ->
+                mipmaps.forEach { it.tiles.flatten().forEach { it.destroy() } }
+                mipmaps.clear()
+                mipmaps.add(Mipmap(1f, createTiles(device, image)))
 
-            gpu.instance.processEvents()
-            gpu.device.queue.onSubmittedWorkDone({ it.run() }, callback)
+                var scale = 1f
+                while (image_width * scale > 512 && image_height * scale > 512) {
+                    scale /= 2
+
+                    if (image_width * scale < 4096 && image_height * scale < 4096) {
+                        val texture = device.createTexture(
+                            GPUTextureDescriptor(
+                                size = GPUExtent3D(
+                                    (image_width * scale).toInt(),
+                                    (image_height * scale).toInt(),
+                                    1
+                                ),
+                                usage = TextureUsage.TextureBinding or TextureUsage.RenderAttachment,
+                                format = TextureFormat.RGBA8Unorm
+                            )
+                        )
+                        render(mipmaps[mipmaps.size - 1], texture, 0f, 0f, scale)
+                        mipmaps.add(Mipmap(scale, listOf(listOf(texture))))
+                    } else {
+                        val im = ImageUtil.resize(
+                            image,
+                            (image_width * scale).toInt(),
+                            (image_height * scale).toInt()
+                        )
+                        mipmaps.add(Mipmap(scale, createTiles(device, im)))
+                    }
+                }
+
+                gpu.instance.processEvents()
+                gpu.device.queue.onSubmittedWorkDone({ it.run() }, callback)
+            }
         }
 
         ready = true
     }
 
-    fun render() {
+    suspend fun render() {
         if (!::gpu.isInitialized) {
             Log.w("webgpuviewer", "GPU not initialized")
             return
         }
 
-        var level = floor(log2(1 / scale)).toInt()
-        level = max(min(level, mipmaps.size - 1), 0)
-        render(mipmaps[level], gpu.webgpuSurface.getCurrentTexture().texture, x, y, scale)
-        gpu.webgpuSurface.present()
+        mutex.mutex.withLock {
+            var level = floor(log2(1 / scale)).toInt()
+            level = max(min(level, mipmaps.size - 1), 0)
+            render(mipmaps[level], gpu.webgpuSurface.getCurrentTexture().texture, x, y, scale)
+            gpu.webgpuSurface.present()
+        }
     }
 
     fun render(mipmap: Mipmap, dst: GPUTexture, x: Float, y: Float, scale: Float) {
