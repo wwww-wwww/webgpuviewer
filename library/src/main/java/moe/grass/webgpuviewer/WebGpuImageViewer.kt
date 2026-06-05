@@ -38,11 +38,14 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.pow
 
 @Composable
 fun WebGpuImageViewer(
     bitmap: Bitmap,
+    doubleTapScale: Float = LocalView.current.resources.displayMetrics.densityDpi / 200f,
+    maxScale: Float = LocalView.current.resources.displayMetrics.densityDpi / 100f,
     modifier: Modifier = Modifier
 ) {
     val view = LocalView.current
@@ -94,7 +97,7 @@ fun WebGpuImageViewer(
                             val new_scale =
                                 originalScale * 10f.pow(2 * totalDeltaY / renderer.height)
 
-                            renderer.scale = max(new_scale, renderer.min_scale)
+                            renderer.scale = min(max(new_scale, renderer.min_scale), maxScale)
                             val diff = 1 / renderer.scale - 1 / originalScale
 
                             val x = originalX + px * diff
@@ -140,7 +143,7 @@ fun WebGpuImageViewer(
                     animationJob.value?.cancel()
 
                     if (renderer.scale == renderer.min_scale) {
-                        val new_scale = 1.5f
+                        val new_scale = doubleTapScale
                         val diff = 1 / new_scale - 1 / renderer.scale
 
                         targetScale = max(new_scale, renderer.min_scale)
@@ -167,7 +170,7 @@ fun WebGpuImageViewer(
                                 (renderer.image_height.toFloat() / renderer.height - 1 / renderer.scale) / 2
                             )
 
-                            renderer.scale = startScale + (targetScale - startScale) * value
+                            renderer.scale = min(startScale + (targetScale - startScale) * value, maxScale)
                             val x = startX + (targetX - startX) * value
                             val y = startY + (targetY - startY) * value
                             renderer.x = x.coerceIn(-max_x, max_x)
@@ -248,7 +251,7 @@ fun WebGpuImageViewer(
                             if (pastTouchSlop) {
                                 val centroid = event.calculateCentroid(useCurrent = false)
                                 if (zoomChange != 1f || panChange != Offset.Zero) {
-                                    val new_scale = renderer.scale * zoomChange
+                                    val new_scale = min(renderer.scale * zoomChange, maxScale)
                                     val diff = 1 / new_scale - 1 / renderer.scale
 
                                     var x =
