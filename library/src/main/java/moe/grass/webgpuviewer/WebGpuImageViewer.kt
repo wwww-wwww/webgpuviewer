@@ -160,7 +160,7 @@ fun WebGpuImageViewer(
 
                     animationJob.value = scope.launch {
                         animate(0f, 1f, animationSpec = tween(300)) { value, _ ->
-
+                            renderer.scale = min(startScale + (targetScale - startScale) * value, maxScale)
                             val max_x = max(
                                 0f,
                                 (renderer.image_width.toFloat() / renderer.width - 1 / renderer.scale) / 2
@@ -169,8 +169,6 @@ fun WebGpuImageViewer(
                                 0f,
                                 (renderer.image_height.toFloat() / renderer.height - 1 / renderer.scale) / 2
                             )
-
-                            renderer.scale = min(startScale + (targetScale - startScale) * value, maxScale)
                             val x = startX + (targetX - startX) * value
                             val y = startY + (targetY - startY) * value
                             renderer.x = x.coerceIn(-max_x, max_x)
