@@ -61,6 +61,9 @@ fun WebGpuImageViewer(
         modifier = modifier
             .fillMaxSize()
             .pointerInput(Unit) { // double tap drag
+                if (!renderer.ready) {
+                    return@pointerInput
+                }
                 animationJob.value?.cancel()
 
                 val doubleTapTimeout = viewConfiguration.doubleTapTimeoutMillis
@@ -123,6 +126,9 @@ fun WebGpuImageViewer(
                 }
             }
             .pointerInput(Unit) { // double tap
+                if (!renderer.ready) {
+                    return@pointerInput
+                }
                 val doubleTapTimeout = viewConfiguration.doubleTapTimeoutMillis
                 val touchSlop = viewConfiguration.touchSlop
 
@@ -182,6 +188,9 @@ fun WebGpuImageViewer(
                 }
             }
             .pointerInput(Unit) {
+                if (!renderer.ready) {
+                    return@pointerInput
+                }
                 awaitEachGesture {
                     var zoom = 1f
                     var pan = Offset.Zero

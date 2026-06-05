@@ -59,6 +59,8 @@ class WebGpuRenderer {
 
     var min_scale: Float = 0f
 
+    var ready = false
+
     class Mipmap(
         val scale: Float,
         val tiles: List<List<GPUTexture>>,
@@ -211,6 +213,8 @@ class WebGpuRenderer {
             gpu.instance.processEvents()
             gpu.device.queue.onSubmittedWorkDone({ it.run() }, callback)
         }
+
+        ready = true
     }
 
     fun render() {
