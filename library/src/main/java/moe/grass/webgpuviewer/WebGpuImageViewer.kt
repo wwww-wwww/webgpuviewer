@@ -31,11 +31,13 @@ import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.input.pointer.util.addPointerInputChange
 import androidx.compose.ui.platform.LocalView
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -366,9 +368,10 @@ fun WebGpuImageViewer(
     ) {
         onSurface { surface, width, height ->
             try {
-                renderer.init(bitmap, surface, width, height)
-
-                renderer.render()
+                withContext(Dispatchers.Default) {
+                    renderer.init(bitmap, surface, width, height)
+                    renderer.render()
+                }
 
                 renderChannel.receiveAsFlow().collect {
                     renderer.render()

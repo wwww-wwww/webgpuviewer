@@ -12,6 +12,7 @@ import androidx.webgpu.GPUBufferDescriptor
 import androidx.webgpu.GPUColor
 import androidx.webgpu.GPUColorTargetState
 import androidx.webgpu.GPUDevice
+import androidx.webgpu.GPUDeviceDescriptor
 import androidx.webgpu.GPUExtent3D
 import androidx.webgpu.GPUFragmentState
 import androidx.webgpu.GPUPrimitiveState
@@ -31,11 +32,13 @@ import androidx.webgpu.PrimitiveTopology.Companion.TriangleList
 import androidx.webgpu.StoreOp
 import androidx.webgpu.TextureFormat
 import androidx.webgpu.TextureUsage
+import androidx.webgpu.awaitGPURequest
 import androidx.webgpu.helper.WebGpu
 import androidx.webgpu.helper.createGpuTexture
 import androidx.webgpu.helper.createWebGpu
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.concurrent.Executor
 import kotlin.math.floor
 import kotlin.math.log2
 import kotlin.math.max
@@ -117,9 +120,17 @@ class WebGpuRenderer {
 
     suspend fun init(image: Bitmap, surface: Surface, width: Int, height: Int) {
         cleanup()
+        val executor = Executor { it.run() }
+        val descriptor =
+            GPUDeviceDescriptor(executor, executor, deviceLostCallback = { _device, i, s ->
+                Log.w("webgpuviewer", "GPU device lost")
+            }, uncapturedErrorCallback = { _device, i, s ->
+                Log.w("webgpuviewer", "Uncaptured error")
+            })
         gpu = createWebGpu(
             surface,
-            requestAdapterOptions = GPURequestAdapterOptions(featureLevel = FeatureLevel.Compatibility)
+            requestAdapterOptions = GPURequestAdapterOptions(featureLevel = FeatureLevel.Compatibility),
+            deviceDescriptor = descriptor
         )
         val device = gpu.device
 
@@ -164,36 +175,41 @@ class WebGpuRenderer {
         )
         byteBuffer.order(ByteOrder.nativeOrder())
 
-        mipmaps.forEach { it.tiles.flatten().forEach { it.destroy() } }
-        mipmaps.clear()
-        mipmaps.add(Mipmap(1f, createTiles(device, image)))
+        awaitGPURequest { callback ->
+            mipmaps.forEach { it.tiles.flatten().forEach { it.destroy() } }
+            mipmaps.clear()
+            mipmaps.add(Mipmap(1f, createTiles(device, image)))
 
-        var scale = 1f
-        while (image_width * scale > 512 && image_height * scale > 512) {
-            scale /= 2
+            var scale = 1f
+            while (image_width * scale > 512 && image_height * scale > 512) {
+                scale /= 2
 
-            if (image_width * scale < 4096 && image_height * scale < 4096) {
-                val texture = device.createTexture(
-                    GPUTextureDescriptor(
-                        size = GPUExtent3D(
-                            (image_width * scale).toInt(),
-                            (image_height * scale).toInt(),
-                            1
-                        ),
-                        usage = TextureUsage.TextureBinding or TextureUsage.RenderAttachment,
-                        format = TextureFormat.RGBA8Unorm
+                if (image_width * scale < 4096 && image_height * scale < 4096) {
+                    val texture = device.createTexture(
+                        GPUTextureDescriptor(
+                            size = GPUExtent3D(
+                                (image_width * scale).toInt(),
+                                (image_height * scale).toInt(),
+                                1
+                            ),
+                            usage = TextureUsage.TextureBinding or TextureUsage.RenderAttachment,
+                            format = TextureFormat.RGBA8Unorm
+                        )
                     )
-                )
-                render(mipmaps[mipmaps.size - 1], texture, 0f, 0f, scale)
-                mipmaps.add(Mipmap(scale, listOf(listOf(texture))))
-            } else {
-                val im = ImageUtil.resize(
-                    image,
-                    (image_width * scale).toInt(),
-                    (image_height * scale).toInt()
-                )
-                mipmaps.add(Mipmap(scale, createTiles(device, im)))
+                    render(mipmaps[mipmaps.size - 1], texture, 0f, 0f, scale)
+                    mipmaps.add(Mipmap(scale, listOf(listOf(texture))))
+                } else {
+                    val im = ImageUtil.resize(
+                        image,
+                        (image_width * scale).toInt(),
+                        (image_height * scale).toInt()
+                    )
+                    mipmaps.add(Mipmap(scale, createTiles(device, im)))
+                }
             }
+
+            gpu.instance.processEvents()
+            gpu.device.queue.onSubmittedWorkDone({ it.run() }, callback)
         }
     }
 
