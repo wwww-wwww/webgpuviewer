@@ -195,7 +195,7 @@ class WebGpuRenderer {
         if (this.image_width == 0) {
             this.x = 0f
             this.y = 0f
-            this.minScale = max(0.01f, min(ratiox, ratioy))
+            this.minScale = min(1f, max(0.01f, min(ratiox, ratioy)))
             this.scale = this.minScale
         }
 
