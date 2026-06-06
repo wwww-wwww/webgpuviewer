@@ -1,7 +1,7 @@
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.compose)
-    `maven-publish`
+    id("com.vanniktech.maven.publish") version "0.36.0"
 }
 
 val gitCommitId = providers.exec {
@@ -49,10 +49,6 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-
-    publishing {
-        singleVariant("release")
-    }
 }
 
 dependencies {
@@ -63,25 +59,36 @@ dependencies {
 }
 
 afterEvaluate {
-    publishing {
-        publications {
-            create<MavenPublication>("maven") {
-                from(components["release"])
+    mavenPublishing {
+        coordinates("moe.grass", "webgpuviewer", "1.0.0-$gitCommitId")
 
-                groupId = "wwww-wwww"
-                artifactId = "webgpuviewer"
-                version = "1.0.0-$gitCommitId"
-            }
-        }
-        repositories {
-            maven {
-                name = "GitHubPackages"
-                url = uri("https://maven.pkg.github.com/wwww-wwww/webgpuviewer")
-                credentials {
-                    username = System.getenv("GITHUB_ACTOR")
-                    password = System.getenv("GITHUB_TOKEN")
+        pom {
+            name.set("webgpuviewer")
+            description.set("webgpuviewer")
+            inceptionYear.set("2026")
+            url.set("https://github.com/wwww-wwww/webgpuviewer/")
+            licenses {
+                license {
+                    name.set("MIT License")
+                    url.set("https://opensource.org")
+                    distribution.set("repo")
                 }
             }
+            developers {
+                developer {
+                    id.set("wwww-wwww")
+                    name.set("w")
+                    url.set("https://github.com/wwww-wwww/")
+                }
+            }
+            scm {
+                url.set("https://github.com/wwww-wwww/webgpuviewer/")
+                connection.set("scm:git:git://github.com/wwww-wwww/webgpuviewer.git")
+                developerConnection.set("scm:git:ssh://git@github.com/wwww-wwww/webgpuviewer.git")
+            }
         }
+
+        publishToMavenCentral(automaticRelease = true)
+        signAllPublications()
     }
 }

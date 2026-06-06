@@ -15,6 +15,9 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+
+    environment: deploy
+
     permissions:
       contents: read
       packages: write
@@ -33,6 +36,9 @@ jobs:
         uses: gradle/actions/setup-gradle@v3
 
       - name: Publish Artifact
-        run: ./gradlew publish
+        run: ./gradlew publishToMavenCentral
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVENCENTRALUSERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVENCENTRALPASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNINGINMEMORYKEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNINGINMEMORYKEYPASSWORD }}
