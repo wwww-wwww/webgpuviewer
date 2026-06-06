@@ -102,8 +102,8 @@ fun WebGpuImageViewer(
                 } else {
                     value
                 }
-                renderer.x = startX + px * diff
-                renderer.y = startY + py * diff
+                renderer.x = (startX + px * diff).orZero()
+                renderer.y = (startY + py * diff).orZero()
 
                 if (abs(renderer.x) < 1.0e-7) {
                     renderer.x = 0f
@@ -181,13 +181,11 @@ fun WebGpuImageViewer(
                                 animate(0f, 1f, animationSpec = tween(300)) { value, _ ->
                                     renderer.scale = startScale + (targetScale - startScale) * value
                                     val diff = 1 / renderer.scale - 1 / startScale
-                                    renderer.x = startX + px * diff
-                                    renderer.y = startY + py * diff
+                                    renderer.x = (startX + px * diff).orZero()
+                                    renderer.y = (startY + py * diff).orZero()
 
-                                    if (abs(renderer.x) < 1.0e-7) {
+                                    if (targetScale == fitScale && value == 1f) {
                                         renderer.x = 0f
-                                    }
-                                    if (abs(renderer.y) < 1.0e-7) {
                                         renderer.y = 0f
                                     }
 
@@ -233,8 +231,8 @@ fun WebGpuImageViewer(
                                     renderer.scale = new_scale
                                     val diff = 1 / renderer.scale - 1 / originalScale
 
-                                    renderer.x = originalX + px * diff
-                                    renderer.y = originalY + py * diff
+                                    renderer.x = (originalX + px * diff).orZero()
+                                    renderer.y = (originalY + py * diff).orZero()
                                     renderChannel.trySend(0f)
                                     change.consume()
                                 }
@@ -257,8 +255,8 @@ fun WebGpuImageViewer(
                                             new_scale.coerceIn(fitScale, altMaxScale)
                                         val diff = 1 / renderer.scale - 1 / originalScale
 
-                                        val x = originalX + px * diff
-                                        val y = originalY + py * diff
+                                        val x = (originalX + px * diff).orZero()
+                                        val y = (originalY + py * diff).orZero()
 
                                         val max_x = max(
                                             0f,
@@ -370,8 +368,8 @@ fun WebGpuImageViewer(
                                             x = x.coerceIn(-max_x, max_x)
                                             y = y.coerceIn(-max_y, max_y)
                                         }
-                                        renderer.x = x
-                                        renderer.y = y
+                                        renderer.x = x.orZero()
+                                        renderer.y = y.orZero()
                                         view.parent?.requestDisallowInterceptTouchEvent(true)
                                         event.changes.forEach {
                                             if (it.positionChanged()) {
@@ -417,8 +415,8 @@ fun WebGpuImageViewer(
                                     lastOffset = value
                                     val dx = (delta.x / renderer.width) / renderer.scale
                                     val dy = (delta.y / renderer.height) / renderer.scale
-                                    renderer.x = (renderer.x + dx).coerceIn(-max_x, max_x)
-                                    renderer.y = (renderer.y + dy).coerceIn(-max_y, max_y)
+                                    renderer.x = (renderer.x + dx).coerceIn(-max_x, max_x).orZero()
+                                    renderer.y = (renderer.y + dy).coerceIn(-max_y, max_y).orZero()
                                     renderChannel.trySend(0f)
                                 }
                             }
@@ -482,6 +480,8 @@ fun WebGpuImageViewer(
                 renderChannel.receiveAsFlow().collect {
                     renderer.render()
                 }
+            } catch (e: Exception) {
+                throw e
             } finally {
                 animationJob.value?.cancel()
                 renderer.cleanup()
@@ -536,3 +536,5 @@ private suspend fun AwaitPointerEventScope.waitForDown(timeout: Long) =
     } catch (e: TimeoutCancellationException) {
         null
     }
+
+fun Float.orZero(): Float = if (this.isNaN()) 0f else this
