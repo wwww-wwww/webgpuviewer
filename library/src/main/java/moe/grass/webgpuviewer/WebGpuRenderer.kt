@@ -1,6 +1,7 @@
 package moe.grass.webgpuviewer
 
 import android.graphics.Bitmap
+import android.graphics.Point
 import android.util.Log
 import android.view.Surface
 import androidx.webgpu.BufferUsage
@@ -33,6 +34,8 @@ import androidx.webgpu.GPUSurface
 import androidx.webgpu.GPUSurfaceConfiguration
 import androidx.webgpu.GPUSurfaceDescriptor
 import androidx.webgpu.GPUSurfaceSourceAndroidNativeWindow
+import androidx.webgpu.GPUTexelCopyBufferLayout
+import androidx.webgpu.GPUTexelCopyTextureInfo
 import androidx.webgpu.GPUTexture
 import androidx.webgpu.GPUTextureDescriptor
 import androidx.webgpu.GPUVertexState
@@ -51,6 +54,7 @@ import kotlinx.coroutines.withContext
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.Executor
+import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.log2
 import kotlin.math.max
@@ -75,24 +79,234 @@ class WebGpuRenderer {
     var image_width: Int = 0
     var image_height: Int = 0
 
-    var minScale: Float = 0f
-    var ratiox: Float = 0f
-    var ratioy: Float = 0f
-
     var ready = false
 
     class Mipmap(
+        val image_width: Int,
+        val image_height: Int,
         val scale: Float,
-        val tiles: List<List<GPUTexture>>,
-        val width: Int,
-        val height: Int
+        val tilesCols: Int,
+        val tilesRows: Int,
+        val tilesize: Int,
     ) {
-        constructor(scale: Float, tiles: List<List<GPUTexture>>) : this(
-            scale,
-            tiles,
-            tiles[0].size,
-            tiles.size
-        )
+        var actualTextures: MutableList<GPUTexture> = mutableListOf()
+        var tiles: MutableList<GPUTexture> = mutableListOf()
+        private lateinit var byteBuffer: ByteBuffer
+        var tilesWidth: Int = 0
+        var tilesHeight: Int = 0
+
+        var x: Int = -1
+        var y: Int = -1
+
+        constructor(
+            image_width: Int,
+            image_height: Int,
+            scale: Float,
+            texture: GPUTexture,
+            tilesize: Int,
+        ) : this(
+            image_width = image_width,
+            image_height = image_height,
+            scale = scale,
+            tilesCols = 1,
+            tilesRows = 1,
+            tilesize = tilesize,
+        ) {
+            actualTextures.add(texture)
+
+            repeat(4) {
+                tiles.add(texture)
+            }
+
+            tilesWidth = image_width
+            tilesHeight = image_height
+        }
+
+        companion object {
+            suspend operator fun invoke(
+                device: GPUDevice,
+                image: Bitmap,
+                scale: Float,
+                tilesize: Int,
+                generateAll: Boolean,
+            ): Mipmap {
+                val mipmap = Mipmap(
+                    image_width = image.width,
+                    image_height = image.height,
+                    scale = scale,
+                    tilesCols = ceil(image.width.toFloat() / tilesize).toInt()
+                        .coerceAtMost(if (generateAll) Int.MAX_VALUE else 2),
+                    tilesRows = ceil(image.height.toFloat() / tilesize).toInt()
+                        .coerceAtMost(if (generateAll) Int.MAX_VALUE else 2),
+                    tilesize = tilesize,
+                )
+
+                mipmap.tilesWidth = min(mipmap.image_width, tilesize * mipmap.tilesCols)
+                mipmap.tilesHeight = min(mipmap.image_height, tilesize * mipmap.tilesRows)
+
+                if (generateAll) {
+                    for (r in 0 until mipmap.tilesRows) {
+                        val textureHeight =
+                            min((r + 1) * tilesize, mipmap.image_height) - (r * tilesize)
+                        for (c in 0 until mipmap.tilesCols) {
+                            Log.i("webgpuviewer", "Create tile " + c + " " + r)
+                            val textureWidth =
+                                min((c + 1) * tilesize, mipmap.image_width) - (c * tilesize)
+                            val cropped = withContext(Dispatchers.Default) {
+                                Bitmap.createBitmap(
+                                    image,
+                                    c * tilesize,
+                                    r * tilesize,
+                                    textureWidth,
+                                    textureHeight
+                                )
+                            }
+                            val texture = cropped.createGpuTexture(device)
+                            mipmap.actualTextures.add(texture)
+                        }
+                    }
+                    mipmap.x = 0
+                    mipmap.y = 0
+                } else {
+                    for (r in 0 until mipmap.tilesRows) {
+                        val textureHeight =
+                            min((r + 1) * tilesize, mipmap.image_height) - (r * tilesize)
+                        for (c in 0 until mipmap.tilesCols) {
+                            val textureWidth =
+                                min((c + 1) * tilesize, mipmap.image_width) - (c * tilesize)
+                            Log.i("Renderer", "Create texture $r $c $textureWidth $textureHeight")
+                            mipmap.actualTextures.add(
+                                device.createTexture(
+                                    GPUTextureDescriptor(
+                                        usage = TextureUsage.CopyDst or TextureUsage.TextureBinding,
+                                        size = GPUExtent3D(textureWidth, textureHeight, 1),
+                                        format = TextureFormat.RGBA8Unorm
+                                    )
+                                )
+                            )
+                        }
+                    }
+
+                    mipmap.loadImage(image)
+                }
+
+                for (r in 0 until 2) {
+                    val row = r.coerceAtMost(mipmap.tilesRows - 1) * mipmap.tilesCols
+                    for (c in 0 until 2) {
+                        val i = row + c.coerceAtMost(mipmap.tilesCols - 1)
+                        mipmap.tiles.add(mipmap.actualTextures[i])
+                    }
+                }
+
+                return mipmap
+            }
+        }
+
+        suspend fun loadImage(image: Bitmap) {
+            withContext(Dispatchers.Default) {
+                byteBuffer = ByteBuffer.allocateDirect(image.byteCount)
+                byteBuffer.order(ByteOrder.nativeOrder())
+                image.copyPixelsToBuffer(byteBuffer)
+            }
+
+            load(webgpu.device!!, x, y, true)
+        }
+
+        fun load(device: GPUDevice, centerX: Int, centerY: Int, force: Boolean = false) {
+            val s = tilesize.toFloat() / 2
+            var x = (round(centerX / s) * s).toInt()
+            var y = (round(centerY / s) * s).toInt()
+            x = (x - tilesWidth / 2).coerceIn(0, image_width - tilesWidth)
+            y = (y - tilesHeight / 2).coerceIn(0, image_height - tilesHeight)
+
+            if (!force && this.x == x && this.y == y) {
+                return
+            }
+
+            this.x = x
+            this.y = y
+
+            Log.i("Renderer", "load $scale $x $y $tilesCols $tilesRows")
+
+            for (r in 0 until tilesRows) {
+                val ty = y + r * actualTextures[0].height
+
+                for (c in 0 until tilesCols) {
+                    val texture = actualTextures[r * tilesCols + c]
+                    val tx = x + c * actualTextures[0].width
+                    val tw = min(texture.width, image_width - tx)
+                    val th = min(texture.height, image_height - ty)
+
+                    Log.i(
+                        "Renderer",
+                        "Copy $tx $ty ${ty * image_width + tx} ${tw} ${th} ${image_width} ${image_height} ${texture.width} ${texture.height}"
+                    )
+
+                    device.queue.writeTexture(
+                        dataLayout =
+                            GPUTexelCopyBufferLayout(
+                                offset = (ty * image_width + tx) * 4L,
+                                bytesPerRow = image_width * 4,
+                                rowsPerImage = th,
+                            ),
+                        data = byteBuffer,
+                        destination = GPUTexelCopyTextureInfo(texture = texture),
+                        writeSize = GPUExtent3D(tw, th)
+                    )
+                }
+            }
+        }
+
+        fun get(device: GPUDevice, centerX: Int, centerY: Int): Point {
+            if (tilesCols == 1 && tilesRows == 1) {
+                return Point(0, 0)
+            }
+
+            load(device, centerX, centerY)
+
+            val cX = centerX.toFloat()
+            val cY = centerY.toFloat()
+
+            val c = (cX / tilesize).toInt()
+            val tX = when {
+                c >= tilesCols - 1 -> tilesCols - 2
+                c <= 0 -> 0
+                else -> {
+                    val xCenterRight = if (c + 1 == tilesCols - 1) {
+                        ((tilesCols - 1) * tilesize + image_width) * 0.5
+                    } else {
+                        (c + 1.5) * tilesize
+                    }
+
+                    if (cX - (c - 0.5) * tilesize < xCenterRight - cX) c - 1 else c
+                }
+            }.coerceIn(0, tilesRows - 1)
+
+            val r = (cY / tilesize).toInt()
+            val tY = when {
+                r >= tilesRows - 1 -> tilesRows - 2
+                r <= 0 -> 0
+                else -> {
+                    val yCenterBottom = if (r + 1 == tilesRows - 1) {
+                        ((tilesRows - 1) * tilesize + image_height) * 0.5
+                    } else {
+                        (r + 1.5) * tilesize
+                    }
+
+                    if (cY - (r - 0.5) * tilesize < yCenterBottom - cY) r - 1 else r
+                }
+            }.coerceIn(0, tilesRows - 1)
+
+            for (r in 0 until 2) {
+                val row = (tY + r).coerceAtMost(tilesRows - 1) * tilesCols
+                for (c in 0 until 2) {
+                    val i = row + (tX + c).coerceAtMost(tilesCols - 1)
+                    tiles[r * 2 + c] = actualTextures[i]
+                }
+            }
+
+            return Point(x + tX * tiles[0].width, y + tY * tiles[0].height)
+        }
     }
 
     var mipmaps: MutableList<Mipmap> = mutableListOf()
@@ -104,30 +318,14 @@ class WebGpuRenderer {
     var x: Float = 0f
     var y: Float = 0f
 
-    suspend fun createTiles(
-        device: GPUDevice,
-        image: Bitmap
-    ): MutableList<MutableList<GPUTexture>> {
-        Log.i("webgpuviewer", "Create tiles " + image.width + " " + image.height)
-        val tiles: MutableList<MutableList<GPUTexture>> = mutableListOf()
-        for (y in 0 until image.height step tilesize) {
-            val col: MutableList<GPUTexture> = mutableListOf()
-            tiles.add(col)
-            for (x in 0 until image.width step tilesize) {
-                Log.i("webgpuviewer", "Create tile " + x + " " + y)
-                val width = min(tilesize, image.width - x)
-                val height = min(tilesize, image.height - y)
-                val cropped = withContext(Dispatchers.Default) {
-                    Bitmap.createBitmap(image, x, y, width, height)
-                }
-                val texture = cropped.createGpuTexture(device)
-                col.add(texture)
-            }
-        }
-        return tiles
-    }
-
-    suspend fun init(image: Bitmap, surface: Surface, width: Int, height: Int) {
+    suspend fun init(
+        image: Bitmap,
+        surface: Surface,
+        width: Int,
+        height: Int,
+        generateAllTiles: Boolean = true,
+        useMipMaps: Boolean = true
+    ) {
         initLibrary()
 
         if (webgpu.instance == null) {
@@ -189,18 +387,6 @@ class WebGpuRenderer {
         this.width = width
         this.height = height
 
-        ratiox = width.toFloat() / image.width.toFloat()
-        ratioy = height.toFloat() / image.height.toFloat()
-
-        if (this.image_width == 0) {
-            this.x = 0f
-            this.y = 0f
-            this.minScale = min(1f, max(0.01f, min(ratiox, ratioy)))
-            this.scale = this.minScale
-        }
-
-        this.image_width = image.width
-        this.image_height = image.height
         byteBuffer.order(ByteOrder.nativeOrder())
 
         buffer = device.createBuffer(
@@ -210,14 +396,31 @@ class WebGpuRenderer {
             )
         )
 
-        mipmaps.forEach { it.tiles.flatten().forEach { it.destroy() } }
-        mipmaps.clear()
-        mipmaps.add(Mipmap(1f, createTiles(device, image)))
+        this.image_width = image.width
+        this.image_height = image.height
 
-        Log.i("webgpuviewer", "Create mipmaps")
+        mipmaps.forEach { it.tiles.forEach { it.destroy() } }
+        mipmaps.clear()
+        mipmaps.add(Mipmap(device, image, 1f, tilesize, generateAllTiles))
+
+        if (!useMipMaps) {
+            ready = true
+            return
+        }
+
+        Log.i("Renderer", "Create mipmaps")
+
         var scale = 1f
-        while (image_width * scale > 4096 && image_height * scale > 4096) {
+
+        while (
+            (!generateAllTiles && (image_width * scale > width && image_height * scale > width))
+            || (image_width * scale > tilesize || image_height * scale > tilesize)
+        ) {
             scale /= 2
+            Log.i(
+                "Renderer",
+                "Create mipmap using CPU ${scale} ${image_width * scale} ${image_height * scale}"
+            )
             val im = withContext(Dispatchers.Default) {
                 ImageUtil.resize(
                     image,
@@ -225,11 +428,15 @@ class WebGpuRenderer {
                     (image_height * scale).toInt()
                 )
             }
-            mipmaps.add(Mipmap(scale, createTiles(device, im)))
+            mipmaps.add(Mipmap(device, im, scale, tilesize, generateAllTiles))
         }
 
-        while (image_width * scale > 512 && image_height * scale > 512) {
+        while (image_width * scale > width && image_height * scale > width) {
             scale /= 2
+            Log.i(
+                "Renderer",
+                "Create mipmap using shader ${scale} ${image_width * scale} ${image_height * scale}"
+            )
             val texture = device.createTexture(
                 GPUTextureDescriptor(
                     size = GPUExtent3D(
@@ -242,10 +449,26 @@ class WebGpuRenderer {
                 )
             )
             render(mipmaps[mipmaps.size - 1], texture, 0f, 0f, scale)
-            mipmaps.add(Mipmap(scale, listOf(listOf(texture))))
+            mipmaps.add(Mipmap(texture.width, texture.height, scale, texture, tilesize))
         }
 
+        Log.i("Renderer", "Finished create mipmaps")
+
         ready = true
+    }
+
+    suspend fun updateImage(image: Bitmap) {
+        mipmaps[0].loadImage(image)
+        mipmaps.drop(1).forEach {
+            val im = withContext(Dispatchers.Default) {
+                ImageUtil.resize(
+                    image,
+                    (image_width * it.scale).toInt(),
+                    (image_height * it.scale).toInt()
+                )
+            }
+            it.loadImage(im)
+        }
     }
 
     fun render() {
@@ -262,40 +485,26 @@ class WebGpuRenderer {
     fun render(mipmap: Mipmap, dst: GPUTexture, x: Float, y: Float, scale: Float) {
         val commandEncoder = webgpu.device!!.createCommandEncoder()
 
-        var vx = round((-x * dst.width + 0.5 * image_width) * mipmap.scale / tilesize).toInt() - 1
-        vx = min(vx, mipmap.width - 2)
-        vx = max(vx, 0)
-        var vy = round((-y * dst.height + 0.5 * image_height) * mipmap.scale / tilesize).toInt() - 1
-        vy = min(vy, mipmap.height - 2)
-        vy = max(vy, 0)
+        val vx = round(((-x * width / image_width + 0.5) * mipmap.image_width)).toInt()
+        val vy = round(((-y * height / image_height + 0.5) * mipmap.image_height)).toInt()
+
+        val pos = mipmap.get(webgpu.device!!, vx, vy)
 
         byteBuffer.putFloat(
             0,
-            (0.5f / scale + x) * mipmap.scale + (vx * tilesize - (mipmap.scale * image_width) / 2f) / dst.width
+            (0.5f / scale + x) * mipmap.scale + (pos.x - 0.5f * mipmap.image_width) / dst.width
         )
         byteBuffer.putFloat(
             4,
-            (0.5f / scale + y) * mipmap.scale + (vy * tilesize - (mipmap.scale * image_height) / 2f) / dst.height
+            (0.5f / scale + y) * mipmap.scale + (pos.y - 0.5f * mipmap.image_height) / dst.height
         )
         byteBuffer.putFloat(8, scale / mipmap.scale)
         byteBuffer.putFloat(12, tilesize.toFloat())
-        byteBuffer.putFloat(16, mipmap.width.toFloat())
-        byteBuffer.putFloat(20, mipmap.height.toFloat())
+        byteBuffer.putFloat(16, mipmap.tilesCols.toFloat())
+        byteBuffer.putFloat(20, mipmap.tilesRows.toFloat())
         byteBuffer.putFloat(24, dst.width.toFloat())
         byteBuffer.putFloat(28, dst.height.toFloat())
         webgpu.device!!.queue.writeBuffer(buffer, 0, byteBuffer)
-
-        val vx1 = if (mipmap.width > 1) vx + 1 else vx
-        val vy1 = if (mipmap.height > 1) vy + 1 else vy
-
-        val textures = arrayOf(
-            mipmap.tiles[vy][vx],
-            mipmap.tiles[vy][vx1],
-            mipmap.tiles[vy1][vx],
-            mipmap.tiles[vy1][vx1],
-        ).mapIndexed { index, texture ->
-            GPUBindGroupEntry(binding = 1 + index, textureView = texture.createView())
-        }
 
         val pass = commandEncoder.beginRenderPass(
             GPURenderPassDescriptor(
@@ -317,8 +526,13 @@ class WebGpuRenderer {
                         GPUBindGroupEntry(
                             binding = 0,
                             buffer = buffer
+                        ),
+                    ).plus(mipmap.tiles.mapIndexed { i, value ->
+                        GPUBindGroupEntry(
+                            binding = 1 + i,
+                            textureView = value.createView()
                         )
-                    ).plus(textures)
+                    })
                 )
             )
         )
@@ -330,7 +544,7 @@ class WebGpuRenderer {
     fun cleanup() {
         surface.close()
         buffer.close()
-        mipmaps.forEach { it.tiles.flatten().forEach { it.destroy() } }
+        mipmaps.forEach { it.tiles.forEach { it.destroy() } }
         mipmaps.clear()
     }
 }
