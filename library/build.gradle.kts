@@ -55,7 +55,6 @@ dependencies {
     implementation(libs.androidx.annotation)
     implementation(libs.androidx.webgpu)
     implementation(libs.androidx.compose.foundation)
-    implementation(libs.coil.compose)
 }
 
 afterEvaluate {

@@ -79,10 +79,6 @@ class WebGpuRenderer {
     var image_width: Int = 0
     var image_height: Int = 0
 
-    var minScale: Float = 0f
-    var ratiox: Float = 0f
-    var ratioy: Float = 0f
-
     var ready = false
 
     class Mipmap(
@@ -223,7 +219,7 @@ class WebGpuRenderer {
             x = (x - tilesWidth / 2).coerceIn(0, image_width - tilesWidth)
             y = (y - tilesHeight / 2).coerceIn(0, image_height - tilesHeight)
 
-            if (force || this.x == x && this.y == y) {
+            if (!force && this.x == x && this.y == y) {
                 return
             }
 
@@ -322,7 +318,14 @@ class WebGpuRenderer {
     var x: Float = 0f
     var y: Float = 0f
 
-    suspend fun init(image: Bitmap, surface: Surface, width: Int, height: Int) {
+    suspend fun init(
+        image: Bitmap,
+        surface: Surface,
+        width: Int,
+        height: Int,
+        generateAllTiles: Boolean = true,
+        useMipMaps: Boolean = true
+    ) {
         initLibrary()
 
         if (webgpu.instance == null) {
@@ -384,18 +387,6 @@ class WebGpuRenderer {
         this.width = width
         this.height = height
 
-        ratiox = width.toFloat() / image.width.toFloat()
-        ratioy = height.toFloat() / image.height.toFloat()
-
-        if (this.image_width == 0) {
-            this.x = 0f
-            this.y = 0f
-            this.minScale = min(1f, max(0.01f, min(ratiox, ratioy)))
-            this.scale = this.minScale
-        }
-
-        this.image_width = image.width
-        this.image_height = image.height
         byteBuffer.order(ByteOrder.nativeOrder())
 
         buffer = device.createBuffer(
@@ -405,15 +396,26 @@ class WebGpuRenderer {
             )
         )
 
+        this.image_width = image.width
+        this.image_height = image.height
+
         mipmaps.forEach { it.tiles.forEach { it.destroy() } }
         mipmaps.clear()
-        mipmaps.add(Mipmap(device, image, 1f, tilesize, true))
+        mipmaps.add(Mipmap(device, image, 1f, tilesize, generateAllTiles))
+
+        if (!useMipMaps) {
+            ready = true
+            return
+        }
 
         Log.i("Renderer", "Create mipmaps")
 
         var scale = 1f
 
-        while (image_width * scale > tilesize || image_height * scale > tilesize) {
+        while (
+            (!generateAllTiles && (image_width * scale > width && image_height * scale > width))
+            || (image_width * scale > tilesize || image_height * scale > tilesize)
+        ) {
             scale /= 2
             Log.i(
                 "Renderer",
@@ -426,7 +428,7 @@ class WebGpuRenderer {
                     (image_height * scale).toInt()
                 )
             }
-            mipmaps.add(Mipmap(device, im, scale, tilesize, true))
+            mipmaps.add(Mipmap(device, im, scale, tilesize, generateAllTiles))
         }
 
         while (image_width * scale > width && image_height * scale > width) {
@@ -453,6 +455,20 @@ class WebGpuRenderer {
         Log.i("Renderer", "Finished create mipmaps")
 
         ready = true
+    }
+
+    suspend fun updateImage(image: Bitmap) {
+        mipmaps[0].loadImage(image)
+        mipmaps.drop(1).forEach {
+            val im = withContext(Dispatchers.Default) {
+                ImageUtil.resize(
+                    image,
+                    (image_width * it.scale).toInt(),
+                    (image_height * it.scale).toInt()
+                )
+            }
+            it.loadImage(im)
+        }
     }
 
     fun render() {
