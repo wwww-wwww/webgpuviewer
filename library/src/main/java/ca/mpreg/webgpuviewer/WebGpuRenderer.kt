@@ -563,6 +563,7 @@ class WebGpuRenderer {
     }
 
     fun cleanup() {
+        animationJob?.cancel()
         surface.close()
         buffer.close()
         mipmaps.forEach { it.tiles.forEach { it.destroy() } }

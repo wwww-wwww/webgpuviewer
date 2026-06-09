@@ -2,6 +2,10 @@ package ca.mpreg.webgpuviewer
 
 import android.graphics.Bitmap
 import android.view.View
+import android.view.ViewGroup
+import android.view.ViewParent
+import android.view.ViewTreeObserver
+import android.widget.ScrollView
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.VectorConverter
 import androidx.compose.animation.core.animate
@@ -13,13 +17,22 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerEvent
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -29,6 +42,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.input.pointer.util.addPointerInputChange
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.awaitCancellation
@@ -39,11 +55,124 @@ import kotlin.math.min
 import kotlin.math.pow
 
 @Composable
+fun WebGpuImageWindow(
+    modifier: Modifier = Modifier,
+    renderer: WebGpuRenderer = WebGpuRenderer(),
+    bitmap: Bitmap,
+) {
+    val view = LocalView.current
+
+    val screenHeight = view.resources.displayMetrics.heightPixels
+
+    val parentScrollView = remember(view) {
+        var parent = view.parent
+        while (parent != null && parent !is ScrollView) {
+            parent = parent.parent
+        }
+        parent as? ViewGroup
+    }
+
+    var containerHeight by remember { mutableStateOf(0f) }
+    var stickyHeight by remember { mutableStateOf(0f) }
+    var containerTopInRoot by remember { mutableStateOf(0f) }
+    var scrollTrigger by remember { mutableIntStateOf(0) }
+
+    DisposableEffect(parentScrollView, view) {
+        val scrollListener = ViewTreeObserver.OnScrollChangedListener {
+            view.invalidate()
+            scrollTrigger++
+        }
+
+        view.viewTreeObserver.addOnScrollChangedListener(scrollListener)
+
+        onDispose {
+            view.viewTreeObserver.removeOnScrollChangedListener(scrollListener)
+        }
+    }
+
+    val currentContainerHeight by rememberUpdatedState(containerHeight)
+    val currentStickyHeight by rememberUpdatedState(stickyHeight)
+    val currentContainerTopInRoot by rememberUpdatedState(containerTopInRoot)
+
+    Box(
+        modifier = modifier
+            .onGloballyPositioned { coordinates ->
+                containerHeight = coordinates.size.height.toFloat()
+                containerTopInRoot = coordinates.positionInRoot().y
+
+            }
+    ) {
+        Box(
+            modifier = Modifier
+                .onGloballyPositioned { coordinates ->
+                    stickyHeight = coordinates.size.height.toFloat()
+                }
+                .graphicsLayer {
+                    val dummy = scrollTrigger
+
+                    val containerLocation = IntArray(2)
+                    view.getLocationInWindow(containerLocation)
+                    val composeViewTopInWindow = containerLocation[1].toFloat()
+
+                    val containerTopInWindow = composeViewTopInWindow + currentContainerTopInRoot
+
+                    val scrollLocation = IntArray(2)
+                    val viewportY = if (parentScrollView != null) {
+                        parentScrollView.getLocationInWindow(scrollLocation)
+                        scrollLocation[1].toFloat()
+                    } else {
+                        0f
+                    }
+
+                    val maxOffset = (currentContainerHeight - currentStickyHeight).coerceAtLeast(0f)
+
+                    translationY = (viewportY - containerTopInWindow).coerceIn(0f, maxOffset)
+
+                    val height = bitmap.height * view.width / bitmap.width
+                    val max_y = renderer.maxY()
+                    val y = (1 + 2 * (-translationY) / (height - screenHeight)) * max_y
+                    renderer.y = y
+                    renderer.render()
+                }
+        )
+        {
+            AndroidExternalSurface(
+                modifier = modifier
+                    .fillMaxWidth()
+                    .height(with(LocalDensity.current) { screenHeight.toDp() })
+
+            ) {
+                onSurface { surface, width, height ->
+                    try {
+                        renderer.init(bitmap, surface, width, height)
+                        val ratiox = width.toFloat() / bitmap.width.toFloat()
+                        val ratioy = height.toFloat() / bitmap.height.toFloat()
+
+                        renderer.minScale = max(0.01f, min(ratiox, ratioy))
+                        renderer.maxScale = 1f
+
+                        renderer.scale = ratiox
+
+                        renderer.render()
+                        awaitCancellation()
+                    } catch (e: Exception) {
+                        throw e
+                    } finally {
+                        renderer.cleanup()
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun WebGpuImageViewer(
     modifier: Modifier = Modifier,
     renderer: WebGpuRenderer = WebGpuRenderer(),
     bitmap: Bitmap,
     doubleTapScale: Float = LocalView.current.resources.displayMetrics.densityDpi / 200f,
+    maxScale: Float = LocalView.current.resources.displayMetrics.densityDpi / 100f,
     startFitWidth: Boolean = true,
     startFitHeight: Boolean = true,
     zoomWide: Boolean = false,
@@ -85,31 +214,23 @@ fun WebGpuImageViewer(
                             val startX = renderer.x
                             val startY = renderer.y
 
-                            var targetScale: Float
-                            val px: Float
-                            val py: Float
-
-                            if (renderer.scale == fitScale.value) {
-                                targetScale = doubleTapScale.value
-                                val diff = 1 / targetScale - 1 / renderer.scale
-
-                                val max_x = renderer.maxX(targetScale)
-                                val max_y = renderer.maxY(targetScale)
-                                var x =
-                                    renderer.x + (secondDown.position.x / renderer.width - 0.5f) * diff
-                                var y =
-                                    renderer.y + (secondDown.position.y / renderer.height - 0.5f) * diff
-                                x = x.coerceIn(-max_x, max_x)
-                                y = y.coerceIn(-max_y, max_y)
-
-                                px = (x - startX) / diff
-                                py = (y - startY) / diff
+                            val targetScale = if (renderer.scale == fitScale.value) {
+                                doubleTapScale.value
                             } else {
-                                targetScale = fitScale.value
-                                val diff = 1 / targetScale - 1 / startScale
-                                px = -startX / diff
-                                py = -startY / diff
+                                fitScale.value
                             }
+                            val diff = 1 / targetScale - 1 / startScale
+
+                            val position = secondDown.position
+                            val max_x = renderer.maxX(targetScale)
+                            val max_y = renderer.maxY(targetScale)
+                            var x = renderer.x + (position.x / renderer.width - 0.5f) * diff
+                            var y = renderer.y + (position.y / renderer.height - 0.5f) * diff
+                            x = x.coerceIn(-max_x, max_x)
+                            y = y.coerceIn(-max_y, max_y)
+
+                            val px = (x - startX) / diff
+                            val py = (y - startY) / diff
 
                             renderer.animationJob?.cancel()
                             renderer.animationJob = scope.launch {
@@ -118,11 +239,6 @@ fun WebGpuImageViewer(
                                     val diff = 1 / renderer.scale - 1 / startScale
                                     renderer.x = (startX + px * diff).orZero()
                                     renderer.y = (startY + py * diff).orZero()
-
-                                    if (targetScale == fitScale.value && value == 1f) {
-                                        renderer.x = 0f
-                                        renderer.y = 0f
-                                    }
 
                                     renderer.render()
                                 }
@@ -359,7 +475,10 @@ fun WebGpuImageViewer(
 
                 val ratiox = width.toFloat() / bitmap.width.toFloat()
                 val ratioy = height.toFloat() / bitmap.height.toFloat()
+
                 renderer.minScale = max(0.01f, min(ratiox, ratioy))
+                renderer.maxScale = maxScale
+
                 fitScale.value = if (startFitWidth && !startFitHeight) {
                     ratiox
                 } else if (!startFitWidth && startFitHeight) {
@@ -403,7 +522,6 @@ fun WebGpuImageViewer(
             } catch (e: Exception) {
                 throw e
             } finally {
-                renderer.animationJob?.cancel()
                 renderer.cleanup()
             }
         }

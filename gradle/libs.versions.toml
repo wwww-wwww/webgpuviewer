@@ -1,5 +1,6 @@
 [versions]
 animationCore = "1.11.2"
+
 [plugins]
 android-application = { id = "com.android.application", version = "9.1.1" }
 android-library = { id = "com.android.library", version = "9.1.1" }
