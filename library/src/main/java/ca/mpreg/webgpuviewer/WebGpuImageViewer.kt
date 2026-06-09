@@ -1,4 +1,4 @@
-package moe.grass.webgpuviewer
+package ca.mpreg.webgpuviewer
 
 import android.graphics.Bitmap
 import android.view.View
@@ -60,17 +60,21 @@ fun WebGpuImageViewer(
     useMipMaps: Boolean = true,
 ) {
     val bitmap by rememberUpdatedState(bitmap)
-    val view = LocalView.current
-    val renderer = remember { WebGpuRenderer() }
-    val renderChannel = remember { Channel<Float>(Channel.CONFLATED) }
-    val scope = rememberCoroutineScope()
-    val animationJob = remember { mutableStateOf<Job?>(null) }
-    val fling = remember { Animatable(Offset.Zero, Offset.VectorConverter) }
+    val zoomStartPosition by rememberUpdatedState(zoomStartPosition)
 
     val fitScale = remember { mutableStateOf(1f) }
     val doubleTapScale = remember { mutableStateOf(doubleTapScale) }
     val maxScale = remember { mutableStateOf(maxScale) }
     val minScale = remember { mutableStateOf(1f) }
+
+    val view = LocalView.current
+    val renderer = remember { WebGpuRenderer() }
+    val renderChannel = remember { Channel<Float>(Channel.CONFLATED) }
+
+    val scope = rememberCoroutineScope()
+
+    val animationJob = remember { mutableStateOf<Job?>(null) }
+    val fling = remember { Animatable(Offset.Zero, Offset.VectorConverter) }
 
     val reset: (origin: Offset) -> Unit = { origin ->
         animationJob.value?.cancel()
@@ -499,11 +503,20 @@ fun WebGpuImageViewer(
                     .drop(1)
                     .map { it }
 
-                merge(imageFlow, renderFlow).collect { action ->
+                val positionFlow = snapshotFlow { zoomStartPosition }
+                    .drop(1)
+                    .map { it }
+
+                merge(imageFlow, renderFlow, positionFlow).collect { action ->
                     when (action) {
                         is Bitmap -> {
                             renderer.updateImage(action)
                             renderer.render()
+                        }
+
+                        is Offset -> {
+                            renderer.x = -zoomStartPosition.x * max_x
+                            renderer.y = -zoomStartPosition.y * max_y
                         }
 
                         0 -> {

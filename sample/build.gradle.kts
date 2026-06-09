@@ -4,15 +4,15 @@ plugins {
 }
 
 android {
-    namespace = "moe.grass.webgpuviewer.test"
-    compileSdk = 36
+    namespace = "ca.mpreg.webgpuviewer.test"
+    compileSdk = 37
 
     defaultConfig {
-        applicationId = "moe.grass.webgpuviewer.test"
+        applicationId = "ca.mpreg.webgpuviewer.test"
         minSdk = 24
 
-        versionCode = 4
-        versionName = "3.1.0"
+        versionCode = 1
+        versionName = "1.0.0"
 
         defaultConfig {
             packagingOptions {
@@ -30,7 +30,7 @@ android {
     }
 
     sourceSets {
-        getByName("main").assets.srcDirs("assets")
+        getByName("main").assets.directories.add("assets")
     }
 
     compileOptions {

@@ -8,8 +8,13 @@ val gitCommitId = providers.exec {
     commandLine("git", "rev-parse", "--short", "HEAD")
 }.standardOutput.asText.map { it.trim() }.getOrElse("unknown")
 
+val baseVersion = "1.0.0-$gitCommitId"
+
+val isTag = System.getenv("GITHUB_REF_TYPE") == "tag"
+
 android {
-    namespace = "moe.grass.webgpuviewer"
+    namespace = "ca.mpreg.webgpuviewer"
+
     compileSdk {
         version = release(36) {
             minorApiLevel = 1
@@ -59,13 +64,14 @@ dependencies {
 
 afterEvaluate {
     mavenPublishing {
-        coordinates("moe.grass", "webgpuviewer", "1.0.1-$gitCommitId")
+        val version = if (isTag) baseVersion else "$baseVersion-SNAPSHOT"
+        coordinates("ca.mpreg", "webgpuviewer", version)
 
         pom {
             name.set("webgpuviewer")
             description.set("webgpuviewer")
             inceptionYear.set("2026")
-            url.set("https://github.com/wwww-wwww/webgpuviewer/")
+            url.set("https://github.com/mpreg-ca/webgpuviewer")
             licenses {
                 license {
                     name.set("MIT License")
@@ -81,9 +87,9 @@ afterEvaluate {
                 }
             }
             scm {
-                url.set("https://github.com/wwww-wwww/webgpuviewer/")
-                connection.set("scm:git:git://github.com/wwww-wwww/webgpuviewer.git")
-                developerConnection.set("scm:git:ssh://git@github.com/wwww-wwww/webgpuviewer.git")
+                url.set("https://github.com/mpreg-ca/webgpuviewer/")
+                connection.set("scm:git:git://github.com/mpreg-ca/webgpuviewer.git")
+                developerConnection.set("scm:git:ssh://git@github.com/mpreg-ca/webgpuviewer.git")
             }
         }
 

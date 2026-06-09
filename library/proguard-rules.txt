@@ -1,1 +1,1 @@
--keep class moe.grass.webgpuviewer.** { *; }
+-keep class ca.mpreg.webgpuviewer.** { *; }

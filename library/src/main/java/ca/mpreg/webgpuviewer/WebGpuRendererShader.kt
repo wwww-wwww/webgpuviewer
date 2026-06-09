@@ -1,19 +1,22 @@
-package moe.grass.webgpuviewer
+package ca.mpreg.webgpuviewer
 
-object WebGpuRendererShaderSingle {
+object WebGpuRendererShader {
     val shader = """
 struct Uniforms {
     offset: vec2<f32>,
     scale: f32,
+    tile_size: f32,
+    tiles_width: f32,
+    tiles_height: f32,
     dst_width: f32,
     dst_height: f32,
-    padding0: f32,
-    padding1: f32,
-    padding2: f32,
 }
 
 @group(0) @binding(0) var<uniform> transform: Uniforms;
-@group(0) @binding(1) var src_tex: texture_2d<f32>;
+@group(0) @binding(1) var src_tex0: texture_2d<f32>;
+@group(0) @binding(2) var src_tex1: texture_2d<f32>;
+@group(0) @binding(3) var src_tex2: texture_2d<f32>;
+@group(0) @binding(4) var src_tex3: texture_2d<f32>;
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
@@ -34,6 +37,40 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 
     out.uv = vec2<f32>(p.x * 0.5 + 0.5, 1.0 - (p.y * 0.5 + 0.5));
     return out;
+}
+
+fn tileLoad(i: i32, pos: vec2<i32>) -> vec4<f32> {
+    if (i == 0) { return textureLoad(src_tex0, pos, 0); }
+    if (i == 1) { return textureLoad(src_tex1, pos, 0); }
+    if (i == 2) { return textureLoad(src_tex2, pos, 0); }
+    return textureLoad(src_tex3, pos, 0);
+}
+
+fn totalDimensions() -> vec2<u32> {
+    let w = i32(transform.tiles_width);
+    let h = i32(transform.tiles_height);
+    if (w <= 0 || h <= 0) {
+        return vec2<u32>(0u);
+    }
+
+    let dim0 = textureDimensions(src_tex0);
+    var width = dim0.x;
+    if (w > 1) { width += textureDimensions(src_tex1).x; }
+
+    var height = dim0.y;
+    if (h > 1) { height += textureDimensions(src_tex2).y; }
+
+    return vec2<u32>(width, height);
+}
+
+fn totalLoad(pos: vec2<i32>) -> vec4<f32> {
+    let ts = i32(transform.tile_size);
+    let tile_x = select(0, 1, pos.x >= ts);
+    let tile_y = select(0, 1, pos.y >= ts);
+    let idx = tile_y * 2 + tile_x;
+
+    let pos0 = pos - vec2<i32>(tile_x, tile_y) * ts;
+    return tileLoad(idx, pos0);
 }
 
 fn to_linear_exact(srgb: vec4<f32>) -> vec4<f32> {
@@ -92,7 +129,7 @@ fn catmull_rom_fast_unrolled(
 
 fn load_safe_linear(pos: vec2<i32>, max_coord: vec2<i32>) -> vec4<f32> {
     if (pos.x >= 0 && pos.x <= max_coord.x && pos.y >= 0 && pos.y <= max_coord.y) {
-        return to_linear_exact(textureLoad(src_tex, pos, 0));
+        return to_linear_exact(totalLoad(pos));
     }
     return vec4<f32>(0.0);
 }
@@ -123,7 +160,7 @@ fn catmull_rom_slow_unrolled(
 }
 
 fn textureSampleCatmullRom(uv: vec2<f32>) -> vec4<f32> {
-    let tex_size_u = textureDimensions(src_tex);
+    let tex_size_u = totalDimensions();
     let tex_size = vec2<f32>(tex_size_u);
     let pixel_coord = uv * tex_size - 0.5;
     let base_coord = vec2<i32>(floor(pixel_coord));
@@ -133,55 +170,157 @@ fn textureSampleCatmullRom(uv: vec2<f32>) -> vec4<f32> {
     let wy = catmull_rom_weights(f.y);
     let max_coord = vec2<i32>(tex_size_u) - 1;
 
+    let ts = i32(transform.tile_size);
+
     let start_i = base_coord - vec2<i32>(1); // Top-left
     let end_i   = base_coord + vec2<i32>(2); // Bottom-right
 
     let canvas_in_bounds = start_i.x >= 0 && start_i.y >= 0 && end_i.x <= max_coord.x && end_i.y <= max_coord.y;
+    let tile_TL = start_i / ts;
+    let tile_BR = end_i / ts;
+    let is_single_tile = all(tile_TL == tile_BR) && canvas_in_bounds;
 
     var final_color_linear = vec4<f32>(0.0);
 
-    let p_start = start_i;
+    if (is_single_tile) {
+        let idx = tile_TL.y * 2 + tile_TL.x;
+        let local_offset = -tile_TL * ts;
+        let p_start = start_i + local_offset;
 
-    final_color_linear = catmull_rom_fast_unrolled(src_tex, p_start, wx, wy);
+        if (idx == 0) {
+            final_color_linear = catmull_rom_fast_unrolled(src_tex0, p_start, wx, wy);
+        } else if (idx == 1) {
+            final_color_linear = catmull_rom_fast_unrolled(src_tex1, p_start, wx, wy);
+        } else if (idx == 2) {
+            final_color_linear = catmull_rom_fast_unrolled(src_tex2, p_start, wx, wy);
+        } else {
+            final_color_linear = catmull_rom_fast_unrolled(src_tex3, p_start, wx, wy);
+        }
+    } else {
+        final_color_linear = catmull_rom_slow_unrolled(start_i, max_coord, wx, wy);
+    }
 
     return clamp(to_srgb_exact(final_color_linear), vec4(0.0), vec4(1.0));
 }
 
-fn downsample(src_start: vec2<f32>, scale: vec2<f32>) -> vec4<f32> {
-    let src_size = textureDimensions(src_tex);
-
-    let src_size_f = vec2<f32>(src_size);
-
-    let src_end = src_start + vec2<f32>(1) * scale;
-
-    let start_i = vec2<i32>(clamp(floor(src_start), vec2<f32>(0.0), src_size_f));
-    let end_i   = vec2<i32>(clamp(ceil(src_end), vec2<f32>(0.0), src_size_f));
-    
+fn loop_over_tile(
+    tex: texture_2d<f32>,
+    start_i: vec2<i32>,
+    end_i: vec2<i32>,
+    src_start: vec2<f32>,
+    src_end: vec2<f32>,
+    local_offset: vec2<i32>
+) -> vec4<f32> {
     var color_sum = vec4<f32>(0.0);
     var weight_sum = 0.0;
 
     for (var y: i32 = start_i.y; y < end_i.y; y++) {
         let y_f = f32(y);
-        let y_overlap = max(0.0, min(y_f + 1.0, src_end.y) - max(y_f, src_start.y));
+        
+        var y_overlap = 1.0;
+        if (y == start_i.y) {
+            y_overlap = min(y_f + 1.0, src_end.y) - src_start.y;
+        } else if (y == end_i.y - 1) {
+            y_overlap = src_end.y - max(y_f, src_start.y);
+        }
+        y_overlap = max(0.0, y_overlap);
+        
+        let py = y + local_offset.y;
 
         for (var x: i32 = start_i.x; x < end_i.x; x++) {
             let x_f = f32(x);
-            let x_overlap = max(0.0, min(x_f + 1.0, src_end.x) - max(x_f, src_start.x));
+
+            var x_overlap = 1.0;
+            if (x == start_i.x) {
+                x_overlap = min(x_f + 1.0, src_end.x) - src_start.x;
+            } else if (x == end_i.x - 1) {
+                x_overlap = src_end.x - max(x_f, src_start.x);
+            }
+            x_overlap = max(0.0, x_overlap);
+
             let weight = x_overlap * y_overlap;
-            var texel = textureLoad(src_tex, vec2<i32>(x, y), 0);
-            texel = to_linear_exact(texel);
+            let px = x + local_offset.x;
+            
+            let texel = to_linear_exact(textureLoad(tex, vec2<i32>(px, py), 0));
             color_sum += texel * weight;
             weight_sum += weight;
         }
     }
-    var col = color_sum / weight_sum;
-    return to_srgb_exact(col);
+    return color_sum / max(weight_sum, 0.0001);
+}
+
+fn downsample(src_start: vec2<f32>, scale: vec2<f32>) -> vec4<f32> {
+    let src_size_f = vec2<f32>(totalDimensions());
+    let src_end = src_start + scale;
+
+    let start_i = vec2<i32>(clamp(floor(src_start), vec2<f32>(0.0), src_size_f));
+    let end_i   = vec2<i32>(clamp(ceil(src_end), vec2<f32>(0.0), src_size_f));
+
+    let ts = i32(transform.tile_size);
+
+    let tile_TL = start_i / ts;
+    let tile_BR = (end_i - 1) / ts;
+
+    let in_bounds = start_i.x >= 0 && start_i.y >= 0 && (end_i.x - 1) < ts * 2 && (end_i.y - 1) < ts * 2;
+    let is_single_tile = all(tile_TL == tile_BR) && in_bounds;
+
+    var color_sum = vec4<f32>(0.0);
+    var weight_sum = 0.0;
+
+    if (is_single_tile) {
+        let idx = tile_TL.y * 2 + tile_TL.x;
+        let local_offset = -tile_TL * ts;
+        
+        var avg_color = vec4<f32>(0.0);
+        
+        if (idx == 0) {
+            avg_color = loop_over_tile(src_tex0, start_i, end_i, src_start, src_end, local_offset);
+        } else if (idx == 1) {
+            avg_color = loop_over_tile(src_tex1, start_i, end_i, src_start, src_end, local_offset);
+        } else if (idx == 2) {
+            avg_color = loop_over_tile(src_tex2, start_i, end_i, src_start, src_end, local_offset);
+        } else {
+            avg_color = loop_over_tile(src_tex3, start_i, end_i, src_start, src_end, local_offset);
+        }
+
+        return to_srgb_exact(avg_color);
+
+    } else {
+        for (var y: i32 = start_i.y; y < end_i.y; y++) {
+            let y_f = f32(y);
+            var y_overlap = 1.0;
+            if (y == start_i.y) {
+                y_overlap = min(y_f + 1.0, src_end.y) - src_start.y;
+            } else if (y == end_i.y - 1) {
+                y_overlap = src_end.y - max(y_f, src_start.y);
+            }
+            y_overlap = max(0.0, y_overlap);
+
+            for (var x: i32 = start_i.x; x < end_i.x; x++) {
+                let x_f = f32(x);
+                var x_overlap = 1.0;
+                if (x == start_i.x) {
+                    x_overlap = min(x_f + 1.0, src_end.x) - src_start.x;
+                } else if (x == end_i.x - 1) {
+                    x_overlap = src_end.x - max(x_f, src_start.x);
+                }
+                x_overlap = max(0.0, x_overlap);
+
+                let weight = x_overlap * y_overlap;
+                let texel = to_linear_exact(totalLoad(vec2<i32>(x, y)));
+                color_sum += texel * weight;
+                weight_sum += weight;
+            }
+        }
+
+        return to_srgb_exact(color_sum / max(weight_sum, 0.0001));
+    }
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let dst_size_f = vec2<f32>(transform.dst_width, transform.dst_height);
-    let src_size_f = vec2<f32>(textureDimensions(src_tex));
+    let src_size_f = vec2<f32>(totalDimensions());
 
     let frag_coord = in.position.xy;
 

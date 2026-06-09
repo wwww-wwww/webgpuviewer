@@ -1,11 +1,11 @@
-package moe.grass.webgpuviewer.test
+package ca.mpreg.webgpuviewer.test
 
 import android.graphics.BitmapFactory
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.ui.platform.ViewCompositionStrategy
-import moe.grass.webgpuviewer.WebGpuImageViewer
-import moe.grass.webgpuviewer.test.databinding.MainActivityBinding
+import ca.mpreg.webgpuviewer.WebGpuImageViewer
+import ca.mpreg.webgpuviewer.test.databinding.MainActivityBinding
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: MainActivityBinding
@@ -25,16 +25,9 @@ class MainActivity : AppCompatActivity() {
             layoutParams = layoutParams.apply { width = screenWidth }
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
             setContent {
-                WebGpuImageViewer(bitmap)
+                WebGpuImageViewer(bitmap=bitmap)
             }
         }
 
-        binding.composeView2.apply {
-            layoutParams = layoutParams.apply { width = screenWidth }
-            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
-            setContent {
-                WebGpuImageViewer(bitmap)
-            }
-        }
     }
 }

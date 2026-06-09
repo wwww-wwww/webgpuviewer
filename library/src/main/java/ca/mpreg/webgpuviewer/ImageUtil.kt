@@ -1,4 +1,4 @@
-package moe.grass.webgpuviewer
+package ca.mpreg.webgpuviewer
 
 import android.graphics.Bitmap
 
