@@ -140,7 +140,6 @@ fun WebGpuImageWindow(
                 modifier = modifier
                     .fillMaxWidth()
                     .height(with(LocalDensity.current) { screenHeight.toDp() })
-
             ) {
                 onSurface { surface, width, height ->
                     try {
@@ -154,6 +153,7 @@ fun WebGpuImageWindow(
                         renderer.scale = ratiox
 
                         renderer.render()
+
                         awaitCancellation()
                     } catch (e: Exception) {
                         throw e
