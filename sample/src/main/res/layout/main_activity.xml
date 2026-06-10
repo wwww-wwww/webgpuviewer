@@ -1,29 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<HorizontalScrollView  xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:fillViewport="true"
-    android:orientation="vertical">
-
-    <androidx.compose.ui.platform.ComposeView
-        android:id="@+id/compose_view_1"
-        android:layout_weight="1"
-        android:layout_width="match_parent"
-        android:layout_height="0dp" />
+    android:layout_height="match_parent">
 
     <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content">
-        <Button
-            android:id="@+id/btn_up"
-            android:text="up"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content" />
+        android:layout_width="wrap_content"
+        android:layout_height="match_parent"
+        android:orientation="horizontal">
+        <ca.mpreg.webgpuviewer.WebGpuImageView
+            android:id="@+id/compose_view_1"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
 
-        <Button
-            android:id="@+id/btn_down"
-            android:text="down"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content" />
+        <ca.mpreg.webgpuviewer.WebGpuImageView
+            android:id="@+id/compose_view_2"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
     </LinearLayout>
-</LinearLayout>
+</HorizontalScrollView>

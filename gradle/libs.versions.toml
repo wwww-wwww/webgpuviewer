@@ -1,10 +1,11 @@
 [versions]
 animationCore = "1.11.2"
+core = "1.19.0"
 
 [plugins]
-android-application = { id = "com.android.application", version = "9.1.1" }
-android-library = { id = "com.android.library", version = "9.1.1" }
-kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version = "2.3.21" }
+android-application = { id = "com.android.application", version = "9.2.1" }
+android-library = { id = "com.android.library", version = "9.2.1" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version = "2.4.0" }
 
 [libraries]
 androidx-annotation = { module = "androidx.annotation:annotation", version = "1.10.0" }
@@ -17,3 +18,4 @@ androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", versi
 androidx-compose-ui = { group = "androidx.compose.ui", name = "ui" }
 androidx-compose-foundation = { group = "androidx.compose.foundation", name = "foundation", version = "1.11.2" }
 androidx-compose-animation-core = { group = "androidx.compose.animation", name = "animation-core", version.ref = "animationCore" }
+androidx-core = { group = "androidx.core", name = "core", version.ref = "core" }

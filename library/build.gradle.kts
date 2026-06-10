@@ -8,7 +8,7 @@ val gitCommitId = providers.exec {
     commandLine("git", "rev-parse", "--short", "HEAD")
 }.standardOutput.asText.map { it.trim() }.getOrElse("unknown")
 
-val baseVersion = "1.0.0-$gitCommitId"
+val baseVersion = "1.0.1-$gitCommitId"
 
 val isTag = System.getenv("GITHUB_REF_TYPE") == "tag"
 
@@ -16,8 +16,8 @@ android {
     namespace = "ca.mpreg.webgpuviewer"
 
     compileSdk {
-        version = release(36) {
-            minorApiLevel = 1
+        version = release(37) {
+            minorApiLevel = 0
         }
     }
 
@@ -58,6 +58,7 @@ android {
 
 dependencies {
     implementation(libs.androidx.annotation)
+    implementation(libs.androidx.core)
     implementation(libs.androidx.webgpu)
     implementation(libs.androidx.compose.foundation)
 }

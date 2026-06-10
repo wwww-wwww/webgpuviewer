@@ -35,9 +35,9 @@ open class WebGpuImageView(context: Context, attrs: AttributeSet? = null) :
     }
 
     open fun init(bitmap: Bitmap) {
-        renderer?.cleanup()
-        renderer = WebGpuRenderer()
         this.content.value = {
+            renderer?.cleanup()
+            renderer = WebGpuRenderer()
             WebGpuImageViewer(
                 renderer = renderer!!,
                 bitmap = bitmap,
@@ -45,18 +45,6 @@ open class WebGpuImageView(context: Context, attrs: AttributeSet? = null) :
                 startFitHeight = startFitHeight,
                 zoomStartPosition = zoomStartPosition,
             )
-        }
-    }
-}
-
-class WebGpuImageWindowView(context: Context, attrs: AttributeSet? = null) :
-    WebGpuImageView(context, attrs) {
-
-    override fun init(bitmap: Bitmap) {
-        renderer?.cleanup()
-        renderer = WebGpuRenderer()
-        this.content.value = {
-            WebGpuImageWindow(renderer = renderer!!, bitmap = bitmap)
         }
     }
 }

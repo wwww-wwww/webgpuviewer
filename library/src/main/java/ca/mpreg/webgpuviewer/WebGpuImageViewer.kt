@@ -2,10 +2,6 @@ package ca.mpreg.webgpuviewer
 
 import android.graphics.Bitmap
 import android.view.View
-import android.view.ViewGroup
-import android.view.ViewParent
-import android.view.ViewTreeObserver
-import android.widget.ScrollView
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.VectorConverter
 import androidx.compose.animation.core.animate
@@ -17,22 +13,13 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerEvent
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -42,9 +29,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.input.pointer.util.addPointerInputChange
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInRoot
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.awaitCancellation
@@ -53,118 +37,6 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
-
-@Composable
-fun WebGpuImageWindow(
-    modifier: Modifier = Modifier,
-    renderer: WebGpuRenderer = WebGpuRenderer(),
-    bitmap: Bitmap,
-) {
-    val view = LocalView.current
-
-    val screenHeight = view.resources.displayMetrics.heightPixels
-
-    val parentScrollView = remember(view) {
-        var parent = view.parent
-        while (parent != null && parent !is ScrollView) {
-            parent = parent.parent
-        }
-        parent as? ViewGroup
-    }
-
-    var containerHeight by remember { mutableStateOf(0f) }
-    var stickyHeight by remember { mutableStateOf(0f) }
-    var containerTopInRoot by remember { mutableStateOf(0f) }
-    var scrollTrigger by remember { mutableIntStateOf(0) }
-
-    DisposableEffect(parentScrollView, view) {
-        val scrollListener = ViewTreeObserver.OnScrollChangedListener {
-            view.invalidate()
-            scrollTrigger++
-        }
-
-        view.viewTreeObserver.addOnScrollChangedListener(scrollListener)
-
-        onDispose {
-            view.viewTreeObserver.removeOnScrollChangedListener(scrollListener)
-        }
-    }
-
-    val currentContainerHeight by rememberUpdatedState(containerHeight)
-    val currentStickyHeight by rememberUpdatedState(stickyHeight)
-    val currentContainerTopInRoot by rememberUpdatedState(containerTopInRoot)
-
-    Box(
-        modifier = modifier
-            .onGloballyPositioned { coordinates ->
-                containerHeight = coordinates.size.height.toFloat()
-                containerTopInRoot = coordinates.positionInRoot().y
-
-            }
-    ) {
-        Box(
-            modifier = Modifier
-                .onGloballyPositioned { coordinates ->
-                    stickyHeight = coordinates.size.height.toFloat()
-                }
-                .graphicsLayer {
-                    val dummy = scrollTrigger
-
-                    val containerLocation = IntArray(2)
-                    view.getLocationInWindow(containerLocation)
-                    val composeViewTopInWindow = containerLocation[1].toFloat()
-
-                    val containerTopInWindow = composeViewTopInWindow + currentContainerTopInRoot
-
-                    val scrollLocation = IntArray(2)
-                    val viewportY = if (parentScrollView != null) {
-                        parentScrollView.getLocationInWindow(scrollLocation)
-                        scrollLocation[1].toFloat()
-                    } else {
-                        0f
-                    }
-
-                    val maxOffset = (currentContainerHeight - currentStickyHeight).coerceAtLeast(0f)
-
-                    translationY = (viewportY - containerTopInWindow).coerceIn(0f, maxOffset)
-
-                    val height = bitmap.height * view.width / bitmap.width
-                    val max_y = renderer.maxY()
-                    val y = (1 + 2 * (-translationY) / (height - screenHeight)) * max_y
-                    renderer.y = y
-                    renderer.render()
-                }
-        )
-        {
-            AndroidExternalSurface(
-                modifier = modifier
-                    .fillMaxWidth()
-                    .height(with(LocalDensity.current) { screenHeight.toDp() })
-            ) {
-                onSurface { surface, width, height ->
-                    try {
-                        renderer.init(bitmap, surface, width, height)
-                        val ratiox = width.toFloat() / bitmap.width.toFloat()
-                        val ratioy = height.toFloat() / bitmap.height.toFloat()
-
-                        renderer.minScale = max(0.01f, min(ratiox, ratioy))
-                        renderer.maxScale = 1f
-
-                        renderer.scale = ratiox
-
-                        renderer.render()
-
-                        awaitCancellation()
-                    } catch (e: Exception) {
-                        throw e
-                    } finally {
-                        renderer.cleanup()
-                    }
-                }
-            }
-        }
-    }
-}
 
 @Composable
 fun WebGpuImageViewer(
@@ -237,10 +109,10 @@ fun WebGpuImageViewer(
                                 animate(0f, 1f, animationSpec = tween(300)) { value, _ ->
                                     renderer.scale = startScale + (targetScale - startScale) * value
                                     val diff = 1 / renderer.scale - 1 / startScale
-                                    renderer.x = (startX + px * diff).orZero()
-                                    renderer.y = (startY + py * diff).orZero()
-
-                                    renderer.render()
+                                    renderer.setPos(
+                                        (startX + px * diff).orZero(),
+                                        (startY + py * diff).orZero()
+                                    )
                                 }
                             }
                         } else {
@@ -282,9 +154,11 @@ fun WebGpuImageViewer(
                                     renderer.scale = new_scale
                                     val diff = 1 / renderer.scale - 1 / originalScale
 
-                                    renderer.x = (originalX + px * diff).orZero()
-                                    renderer.y = (originalY + py * diff).orZero()
-                                    renderer.render()
+                                    renderer.setPos(
+                                        (originalX + px * diff).orZero(),
+                                        (originalY + py * diff).orZero()
+                                    )
+
                                     change.consume()
                                 }
                             }
@@ -312,9 +186,10 @@ fun WebGpuImageViewer(
                                         val max_x = renderer.maxX()
                                         val max_y = renderer.maxY()
 
-                                        renderer.x = x.coerceIn(-max_x, max_x)
-                                        renderer.y = y.coerceIn(-max_y, max_y)
-                                        renderer.render()
+                                        renderer.setPos(
+                                            x.coerceIn(-max_x, max_x),
+                                            y.coerceIn(-max_y, max_y)
+                                        )
                                     }
                                 }
                             } else {
@@ -406,12 +281,14 @@ fun WebGpuImageViewer(
                                         ) != renderer.y)
                                     ) {
                                         renderer.scale = new_scale
+
                                         if (single) {
                                             x = x.coerceIn(-max_x, max_x)
                                             y = y.coerceIn(-max_y, max_y)
                                         }
-                                        renderer.x = x.orZero()
-                                        renderer.y = y.orZero()
+
+                                        renderer.setPos(x.orZero(), y.orZero())
+
                                         view.parent?.requestDisallowInterceptTouchEvent(true)
                                         event.changes.forEach {
                                             if (it.positionChanged()) {
@@ -421,8 +298,6 @@ fun WebGpuImageViewer(
                                     } else {
                                         view.parent?.requestDisallowInterceptTouchEvent(false)
                                     }
-
-                                    renderer.render()
                                 }
                             }
                         } while (!canceled && event.changes.any { it.pressed })
@@ -457,9 +332,10 @@ fun WebGpuImageViewer(
                                     lastOffset = value
                                     val dx = (delta.x / renderer.width) / renderer.scale
                                     val dy = (delta.y / renderer.height) / renderer.scale
-                                    renderer.x = (renderer.x + dx).coerceIn(-max_x, max_x).orZero()
-                                    renderer.y = (renderer.y + dy).coerceIn(-max_y, max_y).orZero()
-                                    renderer.render()
+                                    renderer.setPos(
+                                        (renderer.x + dx).coerceIn(-max_x, max_x).orZero(),
+                                        (renderer.y + dy).coerceIn(-max_y, max_y).orZero()
+                                    )
                                 }
                             }
                         } else {
@@ -467,7 +343,8 @@ fun WebGpuImageViewer(
                         }
                     }
                 }
-            }
+            },
+        isOpaque = false
     ) {
         onSurface { surface, width, height ->
             try {

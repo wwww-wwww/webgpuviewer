@@ -284,7 +284,6 @@ fn downsample(src_start: vec2<f32>, scale: vec2<f32>) -> vec4<f32> {
         }
 
         return to_srgb_exact(avg_color);
-
     } else {
         for (var y: i32 = start_i.y; y < end_i.y; y++) {
             let y_f = f32(y);

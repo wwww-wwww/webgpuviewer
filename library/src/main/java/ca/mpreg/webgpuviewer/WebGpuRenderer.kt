@@ -76,7 +76,7 @@ object webgpu {
 }
 
 class WebGpuRenderer {
-    private lateinit var surface: GPUSurface
+    private var surface: GPUSurface? = null
 
     var tilesize = 4096
 
@@ -329,7 +329,7 @@ class WebGpuRenderer {
     var mipmaps: MutableList<Mipmap> = mutableListOf()
 
     var byteBuffer: ByteBuffer = ByteBuffer.allocateDirect(32)
-    private lateinit var buffer: GPUBuffer
+    private var buffer: GPUBuffer? = null
 
     var scale: Float = 1f
     var x: Float = 0f
@@ -393,7 +393,7 @@ class WebGpuRenderer {
             )
         }
 
-        this.surface.configure(
+        this.surface!!.configure(
             GPUSurfaceConfiguration(
                 webgpu.device!!,
                 width,
@@ -479,6 +479,10 @@ class WebGpuRenderer {
     }
 
     suspend fun updateImage(image: Bitmap) {
+        if (!ready) {
+            return
+        }
+
         mipmaps[0].loadImage(image)
         mipmaps.drop(1).forEach {
             val im = withContext(Dispatchers.Default) {
@@ -492,13 +496,25 @@ class WebGpuRenderer {
         }
     }
 
+    fun setPos(x: Float, y: Float) {
+        if (this.x == x && this.y == y) {
+            return
+        }
+        this.x = x
+        this.y = y
+        render()
+    }
+
     fun render() {
+        if (!ready) {
+            return
+        }
         CoroutineScope(Dispatchers.Main).launch {
             if (mipmaps.isNotEmpty()) {
                 var level = floor(log2(1 / scale)).toInt()
                 level = max(min(level, mipmaps.size - 1), 0)
-                render(mipmaps[level], surface.getCurrentTexture().texture, x, y, scale)
-                surface.present()
+                render(mipmaps[level], surface!!.getCurrentTexture().texture, x, y, scale)
+                surface!!.present()
             }
         }
     }
@@ -525,7 +541,7 @@ class WebGpuRenderer {
         byteBuffer.putFloat(20, mipmap.tilesRows.toFloat())
         byteBuffer.putFloat(24, dst.width.toFloat())
         byteBuffer.putFloat(28, dst.height.toFloat())
-        webgpu.device!!.queue.writeBuffer(buffer, 0, byteBuffer)
+        webgpu.device!!.queue.writeBuffer(buffer!!, 0, byteBuffer)
 
         val pass = commandEncoder.beginRenderPass(
             GPURenderPassDescriptor(
@@ -564,8 +580,8 @@ class WebGpuRenderer {
 
     fun cleanup() {
         animationJob?.cancel()
-        surface.close()
-        buffer.close()
+        surface?.close()
+        buffer?.close()
         mipmaps.forEach { it.tiles.forEach { it.destroy() } }
         mipmaps.clear()
     }
@@ -605,8 +621,8 @@ class WebGpuRenderer {
                 } else {
                     value
                 }
-                x = (startX + px * diff).orZero()
-                y = (startY + py * diff).orZero()
+                var x = (startX + px * diff).orZero()
+                var y = (startY + py * diff).orZero()
 
                 if (abs(x) < 1.0e-7) {
                     x = 0f
@@ -615,7 +631,7 @@ class WebGpuRenderer {
                     y = 0f
                 }
 
-                render()
+                setPos(x, y)
             }
         }
     }
