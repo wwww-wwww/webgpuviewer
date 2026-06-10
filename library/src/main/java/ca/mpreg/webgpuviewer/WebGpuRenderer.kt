@@ -69,9 +69,11 @@ class WebGpuRenderer {
     var height: Int = 0
 
     val imageWidth: Int
-        get() = images.map { it.width - it.position.x }.max() - images.map { it.position.x }.min()
+        get() = images.map { it.width - it.position.x }.max() -
+                min(images.map { it.position.x }.min(), 0)
     val imageHeight: Int
-        get() = images.map { it.height - it.position.y }.max() - images.map { it.position.y }.min()
+        get() = images.map { it.height - it.position.y }.max() -
+                min(images.map { it.position.y }.min(), 0)
 
     var animationJob: Job? = null
 
