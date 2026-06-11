@@ -1,6 +1,5 @@
 package ca.mpreg.webgpuviewer
 
-import android.util.Log
 import android.view.Surface
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
@@ -10,11 +9,8 @@ import androidx.webgpu.DeviceLostException
 import androidx.webgpu.FeatureLevel
 import androidx.webgpu.GPU.createInstance
 import androidx.webgpu.GPUAdapter
-import androidx.webgpu.GPUBindGroupDescriptor
-import androidx.webgpu.GPUBindGroupEntry
 import androidx.webgpu.GPUColor
 import androidx.webgpu.GPUColorTargetState
-import androidx.webgpu.GPUCommandEncoder
 import androidx.webgpu.GPUDevice
 import androidx.webgpu.GPUDeviceDescriptor
 import androidx.webgpu.GPUFragmentState
@@ -32,7 +28,6 @@ import androidx.webgpu.GPUSurface
 import androidx.webgpu.GPUSurfaceConfiguration
 import androidx.webgpu.GPUSurfaceDescriptor
 import androidx.webgpu.GPUSurfaceSourceAndroidNativeWindow
-import androidx.webgpu.GPUTexture
 import androidx.webgpu.GPUVertexState
 import androidx.webgpu.LoadOp
 import androidx.webgpu.PrimitiveTopology.Companion.TriangleList
@@ -48,12 +43,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.util.concurrent.Executor
-import kotlin.math.abs
-import kotlin.math.floor
-import kotlin.math.log2
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.round
 
 object webgpu {
     var instance: GPUInstance? = null
@@ -69,11 +60,19 @@ class WebGpuRenderer {
     var height: Int = 0
 
     val imageWidth: Int
-        get() = images.map { it.width - it.position.x }.max() -
-                min(images.map { it.position.x }.min(), 0)
+        get() = if (images.isNotEmpty()) {
+            images.map { it.width - it.position.x }.max() -
+                    min(images.map { it.position.x }.min(), 0)
+        } else {
+            0
+        }
     val imageHeight: Int
-        get() = images.map { it.height - it.position.y }.max() -
-                min(images.map { it.position.y }.min(), 0)
+        get() = if (images.isNotEmpty()) {
+            images.map { it.height - it.position.y }.max() -
+                    min(images.map { it.position.y }.min(), 0)
+        } else {
+            0
+        }
 
     var animationJob: Job? = null
 
@@ -137,18 +136,18 @@ class WebGpuRenderer {
                         windowFromSurface(it)
                     )
                 )
-            )
+            ).apply {
+                configure(
+                    GPUSurfaceConfiguration(
+                        webgpu.device!!,
+                        width,
+                        height,
+                        TextureFormat.RGBA8Unorm,
+                        TextureUsage.RenderAttachment
+                    )
+                )
+            }
         }
-
-        this.surface!!.configure(
-            GPUSurfaceConfiguration(
-                webgpu.device!!,
-                width,
-                height,
-                TextureFormat.RGBA8Unorm,
-                TextureUsage.RenderAttachment
-            )
-        )
     }
 
     fun maxX(scale: Float = this.scale): Float {
@@ -175,9 +174,9 @@ class WebGpuRenderer {
 
         CoroutineScope(Dispatchers.Main).launch {
             val texture = surface!!.getCurrentTexture().texture
-            val commandEncoder = webgpu.device!!.createCommandEncoder()
+            val encoder = webgpu.device!!.createCommandEncoder()
 
-            val clearPass = commandEncoder.beginRenderPass(
+            encoder.beginRenderPass(
                 GPURenderPassDescriptor(
                     colorAttachments = arrayOf(
                         GPURenderPassColorAttachment(
@@ -188,96 +187,17 @@ class WebGpuRenderer {
                         )
                     )
                 )
-            )
-            clearPass.end()
+            ).end()
 
             images.forEach {
-                var level = floor(log2(1 / scale)).toInt()
-                level = max(min(level, it.mipmaps.size - 1), 0)
-                Log.i(
-                    "webgpurenderer",
-                    "render at ${it.position.x} ${width} ${it.position.x.toFloat() / width}"
-                )
-                render(
-                    commandEncoder,
-                    it,
-                    level,
-                    texture,
-                    x + it.position.x.toFloat() / width,
-                    y + it.position.y.toFloat() / height,
-                    scale
-                )
+                it.render(encoder, texture, x, y, scale)
             }
-            webgpu.device!!.queue.submit(arrayOf(commandEncoder.finish()))
+
+            webgpu.device!!.queue.submit(arrayOf(encoder.finish()))
             surface!!.present()
         }
     }
 
-    fun render(
-        commandEncoder: GPUCommandEncoder,
-        image: Image,
-        level: Int,
-        dst: GPUTexture,
-        x: Float,
-        y: Float,
-        scale: Float
-    ) {
-        val mipmap = image.mipmaps[level]
-
-        val vx = round(((-x * width / mipmap.width + 0.5) * mipmap.width)).toInt()
-        val vy = round(((-y * height / mipmap.height + 0.5) * mipmap.height)).toInt()
-
-        val quad = mipmap.getQuad(vx, vy)
-
-        image.byteBuffer.putFloat(
-            0,
-            (0.5f / scale + x) * mipmap.scale + (quad.x - 0.5f * mipmap.width) / dst.width
-        )
-        image.byteBuffer.putFloat(
-            4,
-            (0.5f / scale + y) * mipmap.scale + (quad.y - 0.5f * mipmap.height) / dst.height
-        )
-        image.byteBuffer.putFloat(8, scale / mipmap.scale)
-        image.byteBuffer.putFloat(12, mipmap.tilesize.toFloat())
-        image.byteBuffer.putFloat(16, mipmap.tilesCols.toFloat())
-        image.byteBuffer.putFloat(20, mipmap.tilesRows.toFloat())
-        image.byteBuffer.putFloat(24, dst.width.toFloat())
-        image.byteBuffer.putFloat(28, dst.height.toFloat())
-        webgpu.device!!.queue.writeBuffer(image.buffer, 0, image.byteBuffer)
-
-        val pass = commandEncoder.beginRenderPass(
-            GPURenderPassDescriptor(
-                colorAttachments = arrayOf(
-                    GPURenderPassColorAttachment(
-                        view = dst.createView(), loadOp = LoadOp.Load, storeOp = StoreOp.Store,
-                        clearValue = GPUColor(0.0, 0.0, 0.0, 1.0)
-                    )
-                )
-            )
-        )
-
-        pass.setPipeline(webgpu.pipeline!!)
-        pass.setBindGroup(
-            0, webgpu.device!!.createBindGroup(
-                GPUBindGroupDescriptor(
-                    layout = webgpu.pipeline!!.getBindGroupLayout(0),
-                    entries = arrayOf(
-                        GPUBindGroupEntry(
-                            binding = 0,
-                            buffer = image.buffer
-                        ),
-                    ).plus(quad.tiles.mapIndexed { i, value ->
-                        GPUBindGroupEntry(
-                            binding = 1 + i,
-                            textureView = value.createView()
-                        )
-                    })
-                )
-            )
-        )
-        pass.draw(6)
-        pass.end()
-    }
 
     fun cleanup() {
         animationJob?.cancel()
@@ -313,29 +233,23 @@ class WebGpuRenderer {
             px = (x - startX) / diff
             py = (y - startY) / diff
         } else {
-            px = (x.coerceIn(-max_x, max_x) - startX)
-            py = (y.coerceIn(-max_y, max_y) - startY)
+            px = x.coerceIn(-max_x, max_x) - startX
+            py = y.coerceIn(-max_y, max_y) - startY
         }
 
         animationJob = scope.launch {
             animate(0f, 1f, animationSpec = tween(300)) { value, _ ->
-                scale = startScale + (targetScale - startScale) * value
+                scale = startScale * (1 - value) + targetScale * value
                 val diff = if (scale != startScale) {
                     1 / scale - 1 / startScale
                 } else {
                     value
                 }
-                var x = (startX + px * diff).orZero()
-                var y = (startY + py * diff).orZero()
 
-                if (abs(x) < 1.0e-7) {
-                    x = 0f
-                }
-                if (abs(y) < 1.0e-7) {
-                    y = 0f
-                }
-
-                setPos(x, y)
+                setPos(
+                    (startX + px * diff).orZero(),
+                    (startY + py * diff).orZero()
+                )
             }
         }
     }

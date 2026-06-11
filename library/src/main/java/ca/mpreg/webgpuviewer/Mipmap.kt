@@ -28,12 +28,7 @@ class Mipmap(
     var x: Int = 0
     var y: Int = 0
 
-    constructor(
-        device: GPUDevice,
-        bitmap: Bitmap,
-        scale: Float,
-        tilesize: Int,
-    ) : this(
+    constructor(device: GPUDevice, bitmap: Bitmap, scale: Float, tilesize: Int) : this(
         width = bitmap.width,
         height = bitmap.height,
         scale = scale,
@@ -51,8 +46,8 @@ class Mipmap(
                     val x = c * tilesize
                     val width = min((c + 1) * tilesize, width) - (c * tilesize)
 
-                    Log.i("webgpuviewer", "Create tile " + c + " " + r)
-                    val size = GPUExtent3D(width = width, height = height)
+                    Log.i("Renderer", "Create tile " + c + " " + r)
+                    val size = GPUExtent3D(width, height)
 
                     val texture = device.createTexture(
                         GPUTextureDescriptor(
@@ -85,6 +80,21 @@ class Mipmap(
                 val i = row + c.coerceAtMost(tilesCols - 1)
                 tiles.add(actualTextures[i])
             }
+        }
+    }
+
+
+    constructor(texture: GPUTexture, scale: Float, tilesize: Int) : this(
+        width = texture.width,
+        height = texture.height,
+        scale = scale,
+        tilesCols = 1,
+        tilesRows = 1,
+        tilesize = tilesize,
+    ) {
+        actualTextures.add(texture)
+        repeat(4) {
+            tiles.add(texture)
         }
     }
 

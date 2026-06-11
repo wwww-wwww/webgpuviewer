@@ -103,7 +103,7 @@ fun WebGpuImageViewer(
                             renderer.animationJob?.cancel()
                             renderer.animationJob = scope.launch {
                                 animate(0f, 1f, animationSpec = tween(300)) { value, _ ->
-                                    renderer.scale = startScale + (targetScale - startScale) * value
+                                    renderer.scale = startScale * (1 - value) + targetScale * value
                                     val diff = 1 / renderer.scale - 1 / startScale
                                     renderer.setPos(
                                         (startX + px * diff).orZero(),
