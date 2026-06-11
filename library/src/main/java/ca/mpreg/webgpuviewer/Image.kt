@@ -41,10 +41,7 @@ class Image(val width: Int, val height: Int) {
     var byteBuffer: ByteBuffer = ByteBuffer.allocateDirect(32)
     lateinit var buffer: GPUBuffer
 
-    constructor(device: GPUDevice, bitmap: Bitmap) : this(
-        width = bitmap.width,
-        height = bitmap.height
-    ) {
+    constructor(device: GPUDevice, bitmap: Bitmap) : this(bitmap.width, bitmap.height) {
         byteBuffer.order(ByteOrder.nativeOrder())
 
         buffer = webgpu.device!!.createBuffer(

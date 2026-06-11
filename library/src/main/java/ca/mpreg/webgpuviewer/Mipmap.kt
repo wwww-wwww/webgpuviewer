@@ -83,7 +83,6 @@ class Mipmap(
         }
     }
 
-
     constructor(texture: GPUTexture, scale: Float, tilesize: Int) : this(
         width = texture.width,
         height = texture.height,

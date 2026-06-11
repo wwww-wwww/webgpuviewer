@@ -337,62 +337,61 @@ fun WebGpuImageViewer(
         isOpaque = false
     ) {
         onSurface { surface, width, height ->
-            try {
-                renderer.init(surface, width, height)
-                val image = Image(webgpu.device!!, bitmap)
-                renderer.addImage(image)
+            renderer.init(surface, width, height)
 
-                val ratiox = width.toFloat() / bitmap.width.toFloat()
-                val ratioy = height.toFloat() / bitmap.height.toFloat()
-
-                renderer.minScale = max(0.01f, min(ratiox, ratioy))
-                renderer.maxScale = maxScale
-
-                fitScale.value = if (startFitWidth && !startFitHeight) {
-                    ratiox
-                } else if (!startFitWidth && startFitHeight) {
-                    ratioy
-                } else if (startFitWidth) {
-                    max(0.01f, min(ratiox, ratioy))
-                } else {
-                    1f
-                }
-
-                if (!startFitWidth && !startFitHeight) {
-                    renderer.scale = 1f
-                } else {
-                    renderer.scale = fitScale.value
-                }
-
-                if (doubleTapScale.value < renderer.minScale) {
-                    doubleTapScale.value = renderer.minScale
-                }
-
-                if (doubleTapScale.value <= fitScale.value) {
-                    doubleTapScale.value = renderer.minScale * 1.5f
-                }
-
-                if (renderer.maxScale < fitScale.value) {
-                    renderer.maxScale = fitScale.value * 2
-                }
-
-                if (zoomWide && renderer.imageWidth > renderer.imageHeight) {
-                    renderer.scale = ratioy
-                }
-                val maxX = renderer.maxX()
-                val maxY = renderer.maxY()
-
-                renderer.x = -zoomStartPosition.x * maxX
-                renderer.y = -zoomStartPosition.x * maxY
-
-                renderer.render()
-
-                awaitCancellation()
-            } catch (e: Exception) {
-                throw e
-            } finally {
+            surface.onDestroyed {
                 renderer.cleanup()
             }
+
+            val image = Image(webgpu.device!!, bitmap)
+            renderer.addImage(image)
+
+            val ratiox = width.toFloat() / bitmap.width.toFloat()
+            val ratioy = height.toFloat() / bitmap.height.toFloat()
+
+            renderer.minScale = max(0.01f, min(ratiox, ratioy))
+            renderer.maxScale = maxScale
+
+            fitScale.value = if (startFitWidth && !startFitHeight) {
+                ratiox
+            } else if (!startFitWidth && startFitHeight) {
+                ratioy
+            } else if (startFitWidth) {
+                max(0.01f, min(ratiox, ratioy))
+            } else {
+                1f
+            }
+
+            if (!startFitWidth && !startFitHeight) {
+                renderer.scale = 1f
+            } else {
+                renderer.scale = fitScale.value
+            }
+
+            if (doubleTapScale.value < renderer.minScale) {
+                doubleTapScale.value = renderer.minScale
+            }
+
+            if (doubleTapScale.value <= fitScale.value) {
+                doubleTapScale.value = renderer.minScale * 1.5f
+            }
+
+            if (renderer.maxScale < fitScale.value) {
+                renderer.maxScale = fitScale.value * 2
+            }
+
+            if (zoomWide && renderer.imageWidth > renderer.imageHeight) {
+                renderer.scale = ratioy
+            }
+            val maxX = renderer.maxX()
+            val maxY = renderer.maxY()
+
+            renderer.x = -zoomStartPosition.x * maxX
+            renderer.y = -zoomStartPosition.x * maxY
+
+            renderer.render()
+
+            awaitCancellation()
         }
     }
 }

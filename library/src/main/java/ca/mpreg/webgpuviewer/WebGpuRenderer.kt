@@ -85,11 +85,7 @@ class WebGpuRenderer {
     var minScale = 0.5f
     var maxScale = 2f
 
-    suspend fun init(
-        surface: Surface,
-        width: Int,
-        height: Int,
-    ) {
+    suspend fun init(surface: Surface, width: Int, height: Int) {
         initLibrary()
 
         if (webgpu.instance == null) {
